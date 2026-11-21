@@ -49,6 +49,27 @@ from pathlib import Path
 VERSION = "1.8"
 HERE = Path(__file__).resolve().parent
 
+# Ensure local .venv/Scripts, bin, and python scripts directories are always in PATH
+for _cand in (HERE / ".venv" / "Scripts", HERE / ".venv" / "bin",
+             Path(sys.executable).parent, Path(sys.prefix) / "Scripts"):
+    if _cand.exists() and str(_cand) not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = str(_cand) + os.pathsep + os.environ.get("PATH", "")
+
+
+def find_tool(name: str) -> str | None:
+    """Locate an executable checking system PATH, .venv/Scripts, and local folders."""
+    exe = shutil.which(name) or shutil.which(f"{name}.exe")
+    if exe:
+        return exe
+    for _p in (HERE / ".venv" / "Scripts" / f"{name}.exe",
+              HERE / ".venv" / "bin" / name,
+              Path(sys.executable).parent / f"{name}.exe",
+              Path(sys.prefix) / "Scripts" / f"{name}.exe",
+              HERE / f"{name}.exe"):
+        if _p.exists():
+            return str(_p)
+    return None
+
 # --------------------------------------------------------------------------- #
 # logging
 # --------------------------------------------------------------------------- #
@@ -696,7 +717,7 @@ class Recorder(threading.Thread):
         while not self.stop_evt.is_set():
             self.prune()
             path = a.rec_dir / f"{a.channel}_{datetime.now():%Y%m%d-%H%M%S}.ts"
-            cmd = ["streamlink", "--loglevel", "info"]
+            cmd = [find_tool("streamlink") or "streamlink", "--loglevel", "info"]
             if a.low_latency and a.platform == "twitch":
                 cmd.append("--twitch-low-latency")
             cmd += a.streamlink_args + ["-o", str(path), url, a.quality]
@@ -2806,7 +2827,7 @@ def parse_args(argv=None):
 
 def check_deps(a) -> None:
     missing = [t for t in (["ffmpeg", "ffprobe"] + ([] if (a.chat_only or a.file or a.vod) else ["streamlink"]))
-               if not shutil.which(t)]
+               if not find_tool(t)]
     if missing:
         sys.exit(f"Missing: {', '.join(missing)}. Install ffmpeg (brew/apt) and "
                  f"`pip install streamlink` (or run ./setup.sh).")
@@ -2901,9 +2922,9 @@ def doctor() -> int:
     print("Clip Watcher doctor\n")
     row(sys.version_info >= (3, 9), "Python", sys.version.split()[0], "install Python 3.9 or newer")
     for tool in ("ffmpeg", "ffprobe"):
-        row(bool(shutil.which(tool)), tool, shutil.which(tool) or "",
+        row(bool(find_tool(tool)), tool, find_tool(tool) or "",
             "Windows: winget install ffmpeg | macOS: brew install ffmpeg | Ubuntu: sudo apt install ffmpeg")
-    if shutil.which("ffmpeg"):
+    if find_tool("ffmpeg"):
         try:
             out = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True,
                                  text=True, timeout=20).stdout
@@ -2911,9 +2932,9 @@ def doctor() -> int:
                 "install a full ffmpeg build (on Windows: the 'gyan.dev full' build)")
         except (OSError, subprocess.SubprocessError):
             row(False, "ffmpeg runs", "", "reinstall ffmpeg")
-    row(bool(shutil.which("streamlink")), "streamlink", shutil.which("streamlink") or "",
+    row(bool(find_tool("streamlink")), "streamlink", find_tool("streamlink") or "",
         "run setup.sh again (it installs into .venv)")
-    print(f"  [{'ok' if shutil.which('yt-dlp') else '--'}] yt-dlp (only for --vod links)"
+    print(f"  [{'ok' if find_tool('yt-dlp') else '--'}] yt-dlp (only for --vod links)"
           + ("" if shutil.which("yt-dlp") else " - optional: run setup.sh again"))
     row(have_asr(), "speech-to-text (faster-whisper) for captions", "",
         "run setup.sh again, or add --no-subs --no-speech to skip it")
@@ -3006,8 +3027,15 @@ def fetch_vod(a) -> Path | None:
         if old:
             log(f"using the video downloaded earlier: {old[0].name} (use --fresh to download again)")
             return old[0]
-    exe = shutil.which("yt-dlp")
-    if not exe:
+    exe = find_tool("yt-dlp")
+    base_exe = [exe] if exe else None
+    if not base_exe:
+        try:
+            import yt_dlp
+            base_exe = [sys.executable, "-m", "yt_dlp"]
+        except ImportError:
+            base_exe = None
+    if not base_exe:
         log("yt-dlp is missing: run setup.sh again (or pip install yt-dlp)")
         return None
     qual_choice = str(getattr(a, "quality", "best")).lower()
@@ -3028,7 +3056,7 @@ def fetch_vod(a) -> Path | None:
         fmt_sel = "bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b"
         qual_msg = "highest available (2K/4K/1080p)"
     log(f"downloading {a.vod} ({qual_msg}; this can take a while for long streams)...")
-    base = [exe, "--no-playlist", "-f", fmt_sel, "--merge-output-format", "mp4",
+    base = base_exe + ["--no-playlist", "-f", fmt_sel, "--merge-output-format", "mp4",
             "-o", str(a.rec_dir / "vod_%(id)s.%(ext)s"), "--print", "after_move:filepath", "--no-simulate"]
     tries = [("", []),
              ("trying another YouTube client", ["--extractor-args", "youtube:player_client=tv,android,web"]),

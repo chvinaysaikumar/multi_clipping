@@ -27,6 +27,14 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import review
 
+HERE = Path(__file__).resolve().parent
+
+# Ensure local .venv/Scripts, bin, and python scripts directories are always in PATH
+for _cand in (HERE / ".venv" / "Scripts", HERE / ".venv" / "bin",
+             Path(sys.executable).parent, Path(sys.prefix) / "Scripts"):
+    if _cand.exists() and str(_cand) not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = str(_cand) + os.pathsep + os.environ.get("PATH", "")
+
 PROFILES = ["gaming", "cricket", "sports", "just-chatting", "irl", "highlights"]
 LAYOUTS = ["crop", "blur", "split"]
 KEY_NAMES = {"gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
@@ -302,6 +310,10 @@ class Runner:
             sf.unlink(missing_ok=True)
 
         env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8", CLIPWATCHER_UI="1")
+        for _c in (self.here / ".venv" / "Scripts", self.here / ".venv" / "bin",
+                  Path(sys.executable).parent, Path(sys.prefix) / "Scripts"):
+            if _c.exists():
+                env["PATH"] = str(_c.resolve()) + os.pathsep + env.get("PATH", "")
         kw = {}
         if sys.platform == "win32":
             kw["creationflags"] = 0x08000000                       # no console window
@@ -314,9 +326,15 @@ class Runner:
         stream_names = [j[0] for j in jobs]
         self._add(f"--- Launching {len(jobs)} stream(s): {', '.join(stream_names)}")
 
+        py_exe = str(self.here / ".venv" / "Scripts" / "python.exe")
+        if not Path(py_exe).exists():
+            py_exe = str(self.here / ".venv" / "bin" / "python")
+        if not Path(py_exe).exists():
+            py_exe = sys.executable
+
         for idx, (label, args, sf) in enumerate(jobs):
             try:
-                proc = subprocess.Popen([sys.executable, "-u", str(self.here / "clipwatcher.py"), *args],
+                proc = subprocess.Popen([py_exe, "-u", str(self.here / "clipwatcher.py"), *args],
                                          cwd=str(self.here), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                          stdin=subprocess.DEVNULL, env=env, **kw)
             except OSError as e:
@@ -395,8 +413,13 @@ class Runner:
 
 
 def run_doctor(here: Path) -> str:
+    py_exe = str(here / ".venv" / "Scripts" / "python.exe")
+    if not Path(py_exe).exists():
+        py_exe = str(here / ".venv" / "bin" / "python")
+    if not Path(py_exe).exists():
+        py_exe = sys.executable
     try:
-        r = subprocess.run([sys.executable, str(here / "clipwatcher.py"), "--doctor"], cwd=str(here),
+        r = subprocess.run([py_exe, str(here / "clipwatcher.py"), "--doctor"], cwd=str(here),
                            capture_output=True, text=True, timeout=60, encoding="utf-8", errors="replace")
         return (r.stdout + r.stderr).strip()
     except (OSError, subprocess.SubprocessError) as e:
