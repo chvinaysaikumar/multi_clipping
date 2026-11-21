@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import review
 
-PROFILES = ["gaming", "just-chatting", "irl", "highlights"]
+PROFILES = ["gaming", "cricket", "sports", "just-chatting", "irl", "highlights"]
 LAYOUTS = ["crop", "blur", "split"]
 KEY_NAMES = {"gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
 DEFAULTS = {"source": "live", "top": "", "range": "", "url": "", "url2": "", "url3": "", "url4": "", "profile": "gaming", "layout": "", "cam": "mid-left", "quality": "2k", "streamer": "", "min_conf": "", "min_rating": "",
@@ -1268,6 +1268,7 @@ pre.doc {
     <!-- Quick Presets -->
     <div class="presets-bar">
       <span style="font-size:12px; font-weight:700; color:var(--text-dim);">QUICK PRESETS:</span>
+      <div class="preset-chip" onclick="applyPreset('cricket')">🏏 Cricket / Sports Highlights</div>
       <div class="preset-chip" onclick="applyPreset('gaming_split')">🎮 Gaming Split (2K 60fps)</div>
       <div class="preset-chip" onclick="applyPreset('just_chatting')">🎙️ Just Chatting Solo</div>
       <div class="preset-chip" onclick="applyPreset('irl_walk')">🚶 IRL Full-Frame</div>
@@ -1292,6 +1293,7 @@ pre.doc {
         <label for="profile">Kind of Stream Profile</label>
         <select id="profile">
           <option value="gaming">Gaming (face cam + gameplay)</option>
+          <option value="cricket">Cricket / Sports (wickets, sixes, crowd roar)</option>
           <option value="just-chatting">Just chatting</option>
           <option value="irl">IRL / walking</option>
           <option value="highlights">Only the best (strict)</option>
@@ -1584,7 +1586,13 @@ $("#source").addEventListener("change", () => {
 
 // Quick Presets
 function applyPreset(name) {
-  if (name === "gaming_split") {
+  if (name === "cricket") {
+    $("#profile").value = "cricket";
+    $("#layout").value = "blur";
+    $("#quality").value = "2k";
+    $("#caption_style").value = "words";
+    $("#style").value = "bold";
+  } else if (name === "gaming_split") {
     $("#profile").value = "gaming";
     $("#layout").value = "split";
     $("#cam").value = "mid-left";

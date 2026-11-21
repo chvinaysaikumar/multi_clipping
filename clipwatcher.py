@@ -2632,6 +2632,10 @@ PROFILES = {
     "just-chatting": dict(layout="crop", motion=False, audio_db=9.0, factor=2.5, min_conf="med"),
     "irl": dict(layout="crop", motion_factor=3.0, min_conf="med"),
     "highlights": dict(layout="crop", min_conf="high", cooldown=60.0),
+    "cricket": dict(layout="blur", audio_db=8.0, min_conf="med", pre=12.0, post=14.0,
+                    hype_words="six,out,bowled,caught,wicket,four,boundary,century,catch,unbelievable,review"),
+    "sports": dict(layout="blur", audio_db=8.0, min_conf="med", pre=10.0, post=14.0,
+                   hype_words="goal,six,out,wicket,touchdown,save,penalty,unbelievable,insane"),
 }
 
 
