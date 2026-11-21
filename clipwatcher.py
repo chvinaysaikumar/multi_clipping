@@ -3153,7 +3153,9 @@ def run_viral_pipeline(a, path: Path, rec: Recording, transcriber, offset: float
         return 0
 
     log(f"viral engine: found {len(segments)} viral story segment(s)!")
-    framer = viral_engine.DynamicAutoFramer()
+    target_h = getattr(a, "out_height", 1920) or 1920
+    target_w = int(target_h * 9 / 16) // 2 * 2
+    framer = viral_engine.DynamicAutoFramer(target_w=target_w, target_h=target_h)
     made = 0
 
     for idx, seg in enumerate(segments):
@@ -3188,7 +3190,8 @@ def run_viral_pipeline(a, path: Path, rec: Recording, transcriber, offset: float
         crop_filter = framer.compute_crop_box(path, s0, length) if a.layout == "crop" else None
         t_enc = time.time()
         ok, err = viral_engine.render_viral_vertical_clip(
-            path, s0, length, dst, ass_path=ass_path, crop_filter=crop_filter, use_gpu=getattr(a, "gpu", True)
+            path, s0, length, dst, ass_path=ass_path, crop_filter=crop_filter,
+            use_gpu=getattr(a, "gpu", True), target_w=target_w, target_h=target_h
         )
 
         if ass_path and ass_path.exists():

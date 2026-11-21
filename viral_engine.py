@@ -272,7 +272,7 @@ class DynamicAutoFramer:
         if chosen_x % 2 != 0:
             chosen_x -= 1
 
-        return f"crop={crop_w}:{src_h}:{chosen_x}:0,scale={self.target_w}:{self.target_h}:flags=lanczos"
+        return f"crop={crop_w}:{src_h}:{chosen_x}:0,scale={self.target_w}:{self.target_h}:flags=lanczos,format=yuv420p,setsar=1"
 
 
 # --------------------------------------------------------------------------- #
@@ -420,12 +420,14 @@ def render_viral_vertical_clip(
     ass_path: Path | None = None,
     crop_filter: str | None = None,
     use_gpu: bool = True,
+    target_w: int = 1080,
+    target_h: int = 1920,
 ) -> tuple[bool, str]:
     """
-    Cuts and exports a vertical 9:16 (1080x1920) clip with:
-      - Dynamic crop or center crop
+    Cuts and exports a vertical 9:16 clip (1080x1920 or 2K 1440x2560) with:
+      - Full-frame 9:16 edge-to-edge crop (Dynamic face-tracked or center)
       - Burned-in karaoke ASS subtitles
-      - Hardware-accelerated GPU encoding (or libx264)
+      - Hardware-accelerated GPU encoding with universal yuv420p color
     """
     encoder, enc_args = detect_gpu_encoder() if use_gpu else ("libx264", ["-preset", "fast", "-crf", "22"])
 
@@ -433,7 +435,9 @@ def render_viral_vertical_clip(
     if crop_filter:
         filter_parts.append(crop_filter)
     else:
-        filter_parts.append("crop=ih*(9/16):ih:(iw-ih*(9/16))/2:0,scale=1080:1920:flags=lanczos")
+        filter_parts.append(
+            f"crop=trunc(ih*9/16/2)*2:ih:(iw-trunc(ih*9/16/2)*2)/2:0,scale={target_w}:{target_h}:flags=lanczos,format=yuv420p,setsar=1"
+        )
 
     if ass_path and ass_path.exists():
         # Clean path for FFmpeg subtitles filter on Windows
@@ -450,6 +454,7 @@ def render_viral_vertical_clip(
         "-vf", vf_chain,
         "-c:v", encoder,
         *enc_args,
+        "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart",
         str(dst_clip)

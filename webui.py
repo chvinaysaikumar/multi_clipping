@@ -38,7 +38,7 @@ for _cand in (HERE / ".venv" / "Scripts", HERE / ".venv" / "bin",
 PROFILES = ["gaming", "cricket", "sports", "just-chatting", "irl", "highlights"]
 LAYOUTS = ["crop", "blur", "split"]
 KEY_NAMES = {"gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
-DEFAULTS = {"source": "live", "top": "", "range": "", "url": "", "url2": "", "url3": "", "url4": "", "profile": "gaming", "layout": "", "cam": "mid-left", "quality": "2k", "streamer": "", "min_conf": "", "min_rating": "",
+DEFAULTS = {"source": "live", "top": "", "range": "", "url": "", "url2": "", "url3": "", "url4": "", "profile": "highlights", "layout": "crop", "cam": "mid-left", "quality": "2k", "streamer": "", "min_conf": "", "min_rating": "",
             "caption_style": "", "style": "", "extra": ""}
 BAD_EXTRA = {"--ui", "--review", "--selftest", "--doctor", "--preview", "--stop-file"}
 
@@ -1327,10 +1327,9 @@ pre.doc {
       <div>
         <label for="layout">Layout Style</label>
         <select id="layout">
-          <option value="crop">Full Vertical 9:16 (Fills Entire Screen · Removes Logos/Borders)</option>
+          <option value="crop">Full Vertical 9:16 (Fills Entire Screen · Best for Shorts & Reels)</option>
           <option value="split">Split: Facecam on Top, Action Below (Shorts / Streamers)</option>
-          <option value="blur">Blurred Background Frame (16:9 Center + Stadium Blur)</option>
-          <option value="">Preset Default</option>
+          <option value="blur">Blurred Background Frame (16:9 Center - Not Full Screen)</option>
         </select>
       </div>
 
@@ -1630,12 +1629,13 @@ function applyPreset(name) {
     $("#style").value = "classic";
   } else if (name === "irl_walk") {
     $("#profile").value = "irl";
-    $("#layout").value = "blur";
+    $("#layout").value = "crop";
     $("#quality").value = "2k";
     $("#caption_style").value = "words";
     $("#style").value = "boxed";
   } else if (name === "viral_strict") {
     $("#profile").value = "highlights";
+    $("#layout").value = "crop";
     $("#min_conf").value = "high";
     $("#min_rating").value = "7";
     $("#quality").value = "2k";
