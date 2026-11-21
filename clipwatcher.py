@@ -1161,13 +1161,14 @@ def video_filter_args(layout: str, out_h: int, split: dict | None = None) -> lis
         h = out_h or 1920
         w = int(h * 9 / 16) // 2 * 2
         fc = (f"[0:v]split=2[a][b];"
-              f"[a]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},boxblur=30:5[bg];"
-              f"[b]scale={w}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v]")
+              f"[a]scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h},boxblur=25:5[bg];"
+              f"[b]scale={w}:-2:flags=lanczos[fg];"
+              f"[bg][fg]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p,setsar=1[v]")
         return ["-filter_complex", fc, "-map", "[v]", "-map", "0:a?"]
     vf = "crop=trunc(ih*9/16/2)*2:ih"
     if out_h:
         vf += f",scale={int(out_h * 9 / 16) // 2 * 2}:{out_h}:flags=lanczos,unsharp=5:5:0.5:5:5:0.0"
-    return ["-vf", vf + ",setsar=1"]
+    return ["-vf", vf + ",format=yuv420p,setsar=1"]
 
 
 def run_ffmpeg(cmd: list[str], cwd: Path | None = None) -> tuple[bool, str]:
@@ -2653,9 +2654,9 @@ PROFILES = {
     "just-chatting": dict(layout="crop", motion=False, audio_db=9.0, factor=2.5, min_conf="med"),
     "irl": dict(layout="crop", motion_factor=3.0, min_conf="med"),
     "highlights": dict(layout="crop", min_conf="high", cooldown=60.0),
-    "cricket": dict(layout="blur", audio_db=8.0, min_conf="med", pre=12.0, post=14.0,
+    "cricket": dict(layout="crop", audio_db=8.0, min_conf="med", pre=12.0, post=14.0,
                     hype_words="six,out,bowled,caught,wicket,four,boundary,century,catch,unbelievable,review"),
-    "sports": dict(layout="blur", audio_db=8.0, min_conf="med", pre=10.0, post=14.0,
+    "sports": dict(layout="crop", audio_db=8.0, min_conf="med", pre=10.0, post=14.0,
                    hype_words="goal,six,out,wicket,touchdown,save,penalty,unbelievable,insane"),
 }
 

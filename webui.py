@@ -1327,9 +1327,9 @@ pre.doc {
       <div>
         <label for="layout">Layout Style</label>
         <select id="layout">
-          <option value="split">Split: Facecam on Top, Gameplay Below (Shorts)</option>
-          <option value="crop">Center Crop (Dynamic Face Focus)</option>
-          <option value="blur">Blurred Background Frame</option>
+          <option value="crop">Full Vertical 9:16 (Fills Entire Screen · Removes Logos/Borders)</option>
+          <option value="split">Split: Facecam on Top, Action Below (Shorts / Streamers)</option>
+          <option value="blur">Blurred Background Frame (16:9 Center + Stadium Blur)</option>
           <option value="">Preset Default</option>
         </select>
       </div>
@@ -1611,7 +1611,7 @@ $("#source").addEventListener("change", () => {
 function applyPreset(name) {
   if (name === "cricket") {
     $("#profile").value = "cricket";
-    $("#layout").value = "blur";
+    $("#layout").value = "crop";
     $("#quality").value = "2k";
     $("#caption_style").value = "words";
     $("#style").value = "bold";
