@@ -1,0 +1,6 @@
+streamlink
+faster-whisper
+chat-downloader
+numpy
+opencv-python-headless>=4.8,<5
+yt-dlp

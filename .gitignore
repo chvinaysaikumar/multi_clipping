@@ -1,0 +1,43 @@
+# Environment & Secrets (NEVER COMMIT)
+.env
+*.env
+.env.*
+!.env.example
+
+# Recordings, clips, and media caches
+rec/
+clips/
+*.mp4
+*.ts
+*.mkv
+*.webm
+*.wav
+*.aac
+*.ass
+*.jpg
+*.jpeg
+*.png
+!assets/*.png
+!assets/*.jpg
+
+# Python / Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+.pytest_cache/
+.coverage
+
+# User and UI local state
+ui_settings.json
+.stop_requested*
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log

@@ -1,0 +1,19 @@
+name: selftest
+on: [push, pull_request]
+jobs:
+  selftest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Offline self-test (no ffmpeg or network needed)
+        run: python clipwatcher.py --selftest
+      - name: Syntax check of launcher scripts
+        if: runner.os != 'Windows'
+        run: bash -n watch.sh && bash -n setup.sh
