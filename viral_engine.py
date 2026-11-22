@@ -275,6 +275,104 @@ class DynamicAutoFramer:
         return f"crop={crop_w}:{src_h}:{chosen_x}:0,scale={self.target_w}:{self.target_h}:flags=lanczos,format=yuv420p,setsar=1"
 
 
+class MultiFaceClusterer:
+    """
+    Detects and clusters multiple speaker faces (e.g. Host on left, Guest on right)
+    for podcast, interview, debate, and co-stream videos.
+    Produces a dual-box stacked 9:16 vertical video layout.
+    """
+
+    def __init__(self, target_w: int = 1080, target_h: int = 1920):
+        self.target_w, self.target_h = target_w, target_h
+        self.cascade = None
+        self._init_cascade()
+
+    def _init_cascade(self):
+        try:
+            import cv2
+            xml = Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"
+            if xml.exists():
+                self.cascade = cv2.CascadeClassifier(str(xml))
+        except Exception:
+            self.cascade = None
+
+    def detect_speakers(self, video_path: Path, start_s: float, length_s: float) -> tuple[float, float, bool]:
+        """
+        Samples frames to detect horizontal positions of two primary speakers.
+        Returns (x1_norm, x2_norm, multi_found).
+        If only one speaker is detected, returns (center_norm, center_norm, False).
+        """
+        try:
+            r = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "v:0",
+                 "-show_entries", "stream=width,height", "-of", "csv=p=0", str(video_path)],
+                capture_output=True, text=True, timeout=5
+            )
+            w_str, h_str = r.stdout.strip().splitlines()[0].split(",")[:2]
+            src_w, src_h = int(w_str), int(h_str)
+        except Exception:
+            src_w, src_h = 1920, 1080
+
+        if not self.cascade:
+            return 0.25, 0.75, True
+
+        sample_n = 10
+        left_faces, right_faces = [], []
+        with tempfile.TemporaryDirectory() as d:
+            pattern = Path(d) / "sample_%02d.jpg"
+            subprocess.run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                 "-ss", f"{max(0.0, start_s):.2f}", "-t", f"{length_s:.2f}", "-i", str(video_path),
+                 "-vf", f"fps={sample_n / max(1.0, length_s):.4f},scale=640:-2",
+                 "-frames:v", str(sample_n), "-q:v", "4", str(pattern)],
+                capture_output=True, timeout=15
+            )
+            import cv2
+            for f in sorted(Path(d).glob("sample_*.jpg")):
+                img = cv2.imread(str(f), cv2.IMREAD_GRAYSCALE)
+                if img is None:
+                    continue
+                h_img, w_img = img.shape
+                faces = self.cascade.detectMultiScale(img, scaleFactor=1.15, minNeighbors=3, minSize=(28, 28))
+                for (fx, fy, fw, fh) in faces:
+                    cx = (fx + fw / 2.0) / w_img
+                    if cx < 0.48:
+                        left_faces.append(cx)
+                    elif cx > 0.52:
+                        right_faces.append(cx)
+
+        if left_faces and right_faces:
+            x1 = sorted(left_faces)[len(left_faces) // 2]
+            x2 = sorted(right_faces)[len(right_faces) // 2]
+            return float(x1), float(x2), True
+        elif left_faces:
+            x1 = sorted(left_faces)[len(left_faces) // 2]
+            return float(x1), float(x1), False
+        elif right_faces:
+            x2 = sorted(right_faces)[len(right_faces) // 2]
+            return float(x2), float(x2), False
+        return 0.25, 0.75, True
+
+    def compute_dual_box_filter(self, video_path: Path, start_s: float, length_s: float) -> str:
+        """
+        Generates an FFmpeg complex filter that stacks Speaker 1 on top and Speaker 2 on bottom.
+        """
+        x1, x2, multi = self.detect_speakers(video_path, start_s, length_s)
+        w, h = self.target_w, self.target_h
+        half_h = h // 2
+        fc = (
+            f"[0:v]split=2[cam1][cam2];"
+            f"[cam1]crop=w='min(iw,trunc(ih*0.95*{w}/{half_h}/2)*2)':h='trunc(ih*0.95/2)*2':"
+            f"x='max(0,min(iw-ow,trunc((iw*{x1:.3f}-ow/2)/2)*2))':y='max(0,trunc((ih*0.05)/2)*2)',"
+            f"scale={w}:{half_h}:flags=lanczos,unsharp=5:5:0.5:5:5:0.0[top];"
+            f"[cam2]crop=w='min(iw,trunc(ih*0.95*{w}/{half_h}/2)*2)':h='trunc(ih*0.95/2)*2':"
+            f"x='max(0,min(iw-ow,trunc((iw*{x2:.3f}-ow/2)/2)*2))':y='max(0,trunc((ih*0.05)/2)*2)',"
+            f"scale={w}:{half_h}:flags=lanczos,unsharp=5:5:0.5:5:5:0.0[bot];"
+            f"[top][bot]vstack=inputs=2,format=yuv420p,setsar=1[v]"
+        )
+        return fc
+
+
 # --------------------------------------------------------------------------- #
 # 4. Semantic Storyline & Virality Engine (Full Transcript Segmentation)
 # --------------------------------------------------------------------------- #
@@ -431,27 +529,36 @@ def render_viral_vertical_clip(
     """
     encoder, enc_args = detect_gpu_encoder() if use_gpu else ("libx264", ["-preset", "fast", "-crf", "22"])
 
-    filter_parts = []
-    if crop_filter:
-        filter_parts.append(crop_filter)
+    is_complex = bool(crop_filter and ("split=2" in crop_filter or "vstack" in crop_filter or crop_filter.startswith("[")))
+    if is_complex:
+        fc = crop_filter
+        if ass_path and ass_path.exists():
+            clean_ass = str(ass_path).replace("\\", "/").replace(":", "\\:")
+            if "[v]" in fc:
+                k = fc.rindex("[v]")
+                fc = fc[:k] + f"[v0];[v0]subtitles='{clean_ass}'[v]"
+            else:
+                fc += f",subtitles='{clean_ass}'"
+        v_args = ["-filter_complex", fc, "-map", "[v]", "-map", "0:a?"]
     else:
-        filter_parts.append(
-            f"crop=trunc(ih*9/16/2)*2:ih:(iw-trunc(ih*9/16/2)*2)/2:0,scale={target_w}:{target_h}:flags=lanczos,format=yuv420p,setsar=1"
-        )
-
-    if ass_path and ass_path.exists():
-        # Clean path for FFmpeg subtitles filter on Windows
-        clean_ass = str(ass_path).replace("\\", "/").replace(":", "\\:")
-        filter_parts.append(f"ass='{clean_ass}'")
-
-    vf_chain = ",".join(filter_parts)
+        filter_parts = []
+        if crop_filter:
+            filter_parts.append(crop_filter)
+        else:
+            filter_parts.append(
+                f"crop=trunc(ih*9/16/2)*2:ih:(iw-trunc(ih*9/16/2)*2)/2:0,scale={target_w}:{target_h}:flags=lanczos,format=yuv420p,setsar=1"
+            )
+        if ass_path and ass_path.exists():
+            clean_ass = str(ass_path).replace("\\", "/").replace(":", "\\:")
+            filter_parts.append(f"ass='{clean_ass}'")
+        v_args = ["-vf", ",".join(filter_parts)]
 
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
         "-ss", f"{start_s:.3f}",
         "-t", f"{length_s:.3f}",
         "-i", str(src_video),
-        "-vf", vf_chain,
+        *v_args,
         "-c:v", encoder,
         *enc_args,
         "-pix_fmt", "yuv420p",

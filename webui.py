@@ -35,8 +35,8 @@ for _cand in (HERE / ".venv" / "Scripts", HERE / ".venv" / "bin",
     if _cand.exists() and str(_cand) not in os.environ.get("PATH", ""):
         os.environ["PATH"] = str(_cand) + os.pathsep + os.environ.get("PATH", "")
 
-PROFILES = ["gaming", "cricket", "sports", "just-chatting", "irl", "highlights"]
-LAYOUTS = ["crop", "blur", "split"]
+PROFILES = ["gaming", "cricket", "sports", "podcast", "just-chatting", "irl", "highlights"]
+LAYOUTS = ["crop", "blur", "split", "podcast"]
 KEY_NAMES = {"gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
 DEFAULTS = {"source": "live", "top": "", "range": "", "url": "", "url2": "", "url3": "", "url4": "", "profile": "highlights", "layout": "crop", "cam": "mid-left", "quality": "2k", "streamer": "", "min_conf": "", "min_rating": "",
             "caption_style": "", "style": "", "extra": ""}
@@ -1292,6 +1292,7 @@ pre.doc {
     <div class="presets-bar">
       <span style="font-size:12px; font-weight:700; color:var(--text-dim);">QUICK PRESETS:</span>
       <div class="preset-chip" onclick="applyPreset('cricket')">🏏 Cricket / Sports Highlights</div>
+      <div class="preset-chip" onclick="applyPreset('podcast')">🎙️ Dual Podcast Stack (2-Person)</div>
       <div class="preset-chip" onclick="applyPreset('gaming_split')">🎮 Gaming Split (2K 60fps)</div>
       <div class="preset-chip" onclick="applyPreset('just_chatting')">🎙️ Just Chatting Solo</div>
       <div class="preset-chip" onclick="applyPreset('irl_walk')">🚶 IRL Full-Frame</div>
@@ -1315,6 +1316,7 @@ pre.doc {
       <div>
         <label for="profile">Kind of Stream Profile</label>
         <select id="profile">
+          <option value="podcast">Podcast / Interview (Two-Person Talk)</option>
           <option value="gaming">Gaming (face cam + gameplay)</option>
           <option value="cricket">Cricket / Sports (wickets, sixes, crowd roar)</option>
           <option value="just-chatting">Just chatting</option>
@@ -1328,6 +1330,7 @@ pre.doc {
         <label for="layout">Layout Style</label>
         <select id="layout">
           <option value="crop">Full Vertical 9:16 (Fills Entire Screen · Best for Shorts & Reels)</option>
+          <option value="podcast">🎙️ Dual-Box Podcast Stack (Speaker A Top + Speaker B Bottom)</option>
           <option value="split">Split: Facecam on Top, Action Below (Shorts / Streamers)</option>
           <option value="blur">Blurred Background Frame (16:9 Center - Not Full Screen)</option>
         </select>
@@ -1611,6 +1614,12 @@ function applyPreset(name) {
   if (name === "cricket") {
     $("#profile").value = "cricket";
     $("#layout").value = "crop";
+    $("#quality").value = "2k";
+    $("#caption_style").value = "words";
+    $("#style").value = "bold";
+  } else if (name === "podcast") {
+    $("#profile").value = "podcast";
+    $("#layout").value = "podcast";
     $("#quality").value = "2k";
     $("#caption_style").value = "words";
     $("#style").value = "bold";

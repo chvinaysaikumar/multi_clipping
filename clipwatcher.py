@@ -1163,6 +1163,22 @@ def video_filter_args(layout: str, out_h: int, split: dict | None = None) -> lis
               f"scale={w}:{gh}:flags=lanczos,unsharp=5:5:0.6:5:5:0.2[bot];"
               f"[top][bot]vstack=inputs=2,setsar=1[v]")
         return ["-filter_complex", fc, "-map", "[v]", "-map", "0:a?"]
+    if layout in ("podcast", "podcast-split"):
+        h = out_h or 1920
+        w = int(h * 9 / 16) // 2 * 2
+        half_h = h // 2
+        cfg = split or {"speaker1": 0.25, "speaker2": 0.75}
+        x1_norm = cfg.get("speaker1", 0.25)
+        x2_norm = cfg.get("speaker2", 0.75)
+        fc = (f"[0:v]split=2[cam1][cam2];"
+              f"[cam1]crop=w='min(iw,trunc(ih*0.95*{w}/{half_h}/2)*2)':h='trunc(ih*0.95/2)*2':"
+              f"x='max(0,min(iw-ow,trunc((iw*{x1_norm}-ow/2)/2)*2))':y='max(0,trunc((ih*0.05)/2)*2)',"
+              f"scale={w}:{half_h}:flags=lanczos,unsharp=5:5:0.5:5:5:0.0[top];"
+              f"[cam2]crop=w='min(iw,trunc(ih*0.95*{w}/{half_h}/2)*2)':h='trunc(ih*0.95/2)*2':"
+              f"x='max(0,min(iw-ow,trunc((iw*{x2_norm}-ow/2)/2)*2))':y='max(0,trunc((ih*0.05)/2)*2)',"
+              f"scale={w}:{half_h}:flags=lanczos,unsharp=5:5:0.5:5:5:0.0[bot];"
+              f"[top][bot]vstack=inputs=2,format=yuv420p,setsar=1[v]")
+        return ["-filter_complex", fc, "-map", "[v]", "-map", "0:a?"]
     if layout == "blur":
         h = out_h or 1920
         w = int(h * 9 / 16) // 2 * 2
@@ -1332,7 +1348,7 @@ def make_ass(cues, title: str, layout: str, out_h: int, cam_share: float, durati
     w = int(h * 9 / 16) // 2 * 2
     st_ = STYLES.get(style, STYLES["classic"])
     tsize, csize = round(h * st_["tsize"]), round(h * st_["csize"])
-    title_y = int(h * cam_share) if layout == "split" else int(h * 0.20)   # on the seam between face and game
+    title_y = int(h * cam_share) if layout == "split" else (int(h * 0.50) if layout in ("podcast", "podcast-split") else int(h * 0.20))
     cap_margin = round(h * 0.17)
     head = ("[Script Info]\nScriptType: v4.00+\nWrapStyle: 0\nScaledBorderAndShadow: yes\n"
             f"PlayResX: {w}\nPlayResY: {h}\n\n[V4+ Styles]\n"
@@ -2243,9 +2259,20 @@ class ClipMaker:
                     " - lower than 1080p, so vertical clips will look soft; use --quality best (or a 1080p stream)"))
             except (StopIteration, ValueError, OSError):
                 pass
-        if a.layout == "split":
+        if a.layout in ("podcast", "podcast-split"):
+            try:
+                import viral_engine
+                out_w = int((a.out_height or 1920) * 9 / 16) // 2 * 2
+                mfc = viral_engine.MultiFaceClusterer(target_w=out_w, target_h=a.out_height or 1920)
+                x1, x2, _ = mfc.detect_speakers(rec.path, start, length)
+                split = {"speaker1": x1, "speaker2": x2}
+            except Exception:
+                split = {"speaker1": 0.25, "speaker2": 0.75}
+        elif a.layout == "split":
             resolve_cam(a, rec.path, start, length)
-        split = split_cfg(a) if a.layout == "split" else None
+            split = split_cfg(a)
+        else:
+            split = None
         t_enc = time.time()
         ok, err = cut_vertical(rec.path, start, length, dst, a.layout, a.out_height, a.crf, a.preset,
                                split, ass, a.av_offset, not a.no_normalize)
@@ -2451,6 +2478,8 @@ def selftest() -> int:
     checks.append(("split layout: stacks cam over game", "vstack" in sp[1] and "scale=1080:690" in sp[1]))
     checks.append(("split layout: cam share changes panel heights", "scale=1080:576" in
                    video_filter_args("split", 1920, {"cam": (0, 0.4, 0.2, 0.2), "share": 0.30, "game_x": 0.5})[1]))
+    pod = video_filter_args("podcast", 1920)
+    checks.append(("podcast layout: stacks dual speakers 9:16", "vstack" in pod[1] and "scale=1080:960" in pod[1]))
     cf = cam_from_faces([(84, 273, 34, 34)] * 6 + [(585, 287, 111, 111)] * 6, 960, 540)
     checks.append(("auto cam: edge face beats a centred one", bool(cf) and cf[0][0] < 0.2 and cf[1] == 6))
     checks.append(("auto cam: one-off detection ignored", cam_from_faces([(10, 10, 30, 30)], 960, 540) is None))
@@ -2681,6 +2710,7 @@ PROFILES = {
                     hype_words="six,out,bowled,caught,wicket,four,boundary,century,catch,unbelievable,review"),
     "sports": dict(layout="crop", audio_db=8.0, min_conf="med", pre=10.0, post=14.0,
                    hype_words="goal,six,out,wicket,touchdown,save,penalty,unbelievable,insane"),
+    "podcast": dict(layout="podcast", min_conf="med", audio_db=4.0, pre=14.0, post=16.0),
 }
 
 
@@ -2766,9 +2796,9 @@ def parse_args(argv=None):
                    help="seconds chat reacts after the event (default: 5 Twitch, 8 YouTube); raise it "
                         "if clips START too late (you miss the setup), lower it if too early")
     g = p.add_argument_group("video")
-    g.add_argument("--layout", choices=["crop", "blur", "split"], default="crop",
-                   help="crop = center crop; blur = full frame over a blurred background; "
-                        "split = face cam on top + gameplay below (shorts style)")
+    g.add_argument("--layout", choices=["crop", "blur", "split", "podcast"], default="crop",
+                   help="crop = center crop; podcast = dual-box stacked interview/podcast; "
+                        "split = face cam on top + gameplay below; blur = full frame over blurred background")
     g.add_argument("--cam", default="auto",
                    help="split layout: 'auto' finds the face cam by itself, or give x,y,w,h as fractions of the frame")
     g.add_argument("--cam-share", type=float, default=0.36, help="split layout: share of the height used by the face cam")
@@ -3209,8 +3239,17 @@ def run_viral_pipeline(a, path: Path, rec: Recording, transcriber, offset: float
         log(f"    Hook: \"{seg['hook']}\"")
         log(f"    Topic: {seg['topic']} | Reason: {seg['reason']}")
 
-        # Compute dynamic auto-framer crop
-        crop_filter = framer.compute_crop_box(path, s0, length) if a.layout == "crop" else None
+        # Compute dynamic auto-framer or podcast multi-framer crop
+        if a.layout in ("podcast", "podcast-split"):
+            multi_framer = getattr(a, "_multi_framer", None)
+            if multi_framer is None:
+                multi_framer = viral_engine.MultiFaceClusterer(target_w=target_w, target_h=target_h)
+                a._multi_framer = multi_framer
+            crop_filter = multi_framer.compute_dual_box_filter(path, s0, length)
+        elif a.layout == "crop":
+            crop_filter = framer.compute_crop_box(path, s0, length)
+        else:
+            crop_filter = None
         t_enc = time.time()
         ok, err = viral_engine.render_viral_vertical_clip(
             path, s0, length, dst, ass_path=ass_path, crop_filter=crop_filter,
