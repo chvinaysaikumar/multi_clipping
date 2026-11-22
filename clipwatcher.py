@@ -3522,6 +3522,8 @@ def run_file(a) -> int:
     cache = a.rec_dir / f"{path.stem}.analysis.json"
     found: list = []
     jump = (0.0, 0.0, 0.0)
+    best_motion = (0.0, 0.0, 0.0, 0.0)
+    mw = None
     try:
         saved = json.loads(cache.read_text(encoding="utf-8")) if (cache.exists() and not a.fresh) else None
     except (OSError, ValueError):
@@ -3529,6 +3531,7 @@ def run_file(a) -> int:
     if saved and saved.get("key") == key:
         found = [tuple(e) for e in saved["events"]]
         jump = tuple(saved.get("jump") or jump)
+        best_motion = tuple(saved.get("best_motion") or best_motion)
         log(f"reusing the saved scan of this video ({len(found)} loud/fast moments); use --fresh to scan again")
     else:
         events: queue.Queue = queue.Queue()
@@ -3560,6 +3563,7 @@ def run_file(a) -> int:
             return 130
         log(f"scan done in {(time.time() - t0) / 60:.1f} min")
         jump = mw.best_jump
+        best_motion = getattr(mw, "best_motion", (0.0, 0.0, 0.0, 0.0))
         while True:
             try:
                 _r, kind, pos, score, detail = events.get_nowait()
@@ -3567,7 +3571,7 @@ def run_file(a) -> int:
                 break
             found.append((kind, pos, score, detail))
         try:
-            cache.write_text(json.dumps({"key": key, "events": found, "jump": list(jump)}), encoding="utf-8")
+            cache.write_text(json.dumps({"key": key, "events": found, "jump": list(jump), "best_motion": list(best_motion)}), encoding="utf-8")
         except OSError:
             pass
 
@@ -3601,8 +3605,9 @@ def run_file(a) -> int:
         log(f"short video: video is {dur:.0f}s; clipping highlight around peak at {peak_t:.1f}s")
 
     # Adaptive Computer Vision Motion Peak:
-    if getattr(mw, "best_motion", (0,))[0] >= 1.4 and (not fusion.open or len(fusion.open) < (a.top or 3)):
-        m_factor, m_t, m_avg, m_base = mw.best_motion
+    b_motion = getattr(mw, "best_motion", best_motion) if mw is not None else best_motion
+    if b_motion[0] >= 1.4 and (not fusion.open or len(fusion.open) < (a.top or 3)):
+        m_factor, m_t, m_avg, m_base = b_motion
         fusion.add(rec, "motion", m_t, min(2.0, m_factor / 1.5),
                    f"peak visual action {m_factor:.1f}x (diff {m_avg:.0f} vs {m_base:.0f})", None, now=0.0)
         log(f"adaptive scan: captured peak visual action {m_factor:.1f}x at {m_t:.1f}s")
