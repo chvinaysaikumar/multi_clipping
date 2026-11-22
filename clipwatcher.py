@@ -1537,7 +1537,7 @@ class TitleWriter:
             if not gem.startswith("AIzaSy") and not gem.startswith("test"):
                 self._warn("GEMINI_API_KEY does not look like a standard Google AI Studio key (expected 'AIzaSy...'). "
                            "Get a valid free key at https://aistudio.google.com")
-        elif mode in ("auto", "claude") and cla:
+        elif mode in ("auto", "claude") and cla and len(cla) > 30 and cla.startswith("sk-ant-"):
             self.provider, self.key = "claude", cla
         self.model = a.title_model or (self.DEFAULT_MODEL[self.provider] if self.provider else "")
         self.base = os.environ.get("CLIPWATCHER_TITLE_URL", "")      # for testing against a local fake server
@@ -2114,6 +2114,8 @@ class ClipMaker:
                 post = reaction_end(lv, 0.5, lo, pos, a.min_post, a.max_post)
                 log(f"      clip length: the action lasted ~{post:.0f}s after the moment")
         end = min(pos + post, have)
+        if have <= 65.0:
+            start, end = 0.0, have
 
         # What was said? One speech-to-text pass over the whole area around the moment gives us the sentences
         # (so we never cut mid-sentence), the speech check, the captions and the AI's transcript.
@@ -3333,7 +3335,10 @@ def run_file(a) -> int:
         events: queue.Queue = queue.Queue()
         mw = MediaWatcher(a, None, stop, events)
         mw.direct, mw.offset, mw.span = True, offset, span
-        mw.only = {k for k in (("audio", "motion") if a.scan == "full" else ("audio",)) if getattr(a, k, True)}
+        if span <= 600 and a.motion:
+            mw.only = {k for k in ("audio", "motion") if getattr(a, k, True)}
+        else:
+            mw.only = {k for k in (("audio", "motion") if a.scan == "full" else ("audio",)) if getattr(a, k, True)}
         th = threading.Thread(target=mw.analyze, args=(rec,), daemon=True)
         log(f"scanning the {'sound' if a.scan == 'fast' else 'sound and picture'} of {span / 60:.0f} minutes "
             f"({'fast scan: motion is checked later, only around the best moments' if a.scan == 'fast' else 'full scan: slower'})")
@@ -3381,6 +3386,37 @@ def run_file(a) -> int:
                 "the AI picture sweep below looks for those")
         else:
             log(f"diagnosis: a sound jump of +{jump[0]:.0f} dB was seen at {jump[1] / 60:.1f} min, but did not trigger a candidate clip.")
+
+    # Adaptive VOD thresholding:
+    # Modern YouTube videos/VODs are mastered and dynamic-range compressed,
+    # so relative sound spikes are ~1.8 to 5.0 dB rather than +9 dB.
+    if not fusion.open and jump[0] >= 1.8:
+        fusion.add(rec, "audio", jump[1], max(0.9, jump[0] / 3.0),
+                   f"relative sound peak +{jump[0]:.1f} dB ({jump[2]:.0f} dBFS)", None, now=0.0)
+        log(f"adaptive scan: captured relative sound peak +{jump[0]:.1f} dB at {jump[1]:.1f}s")
+    elif not fusion.open and dur <= 90:
+        peak_t = jump[1] if jump[0] > 0 else (dur / 2.0)
+        fusion.add(rec, "audio", peak_t, 1.0, f"short video highlight ({dur:.0f}s)", None, now=0.0)
+        log(f"short video: video is {dur:.0f}s; clipping highlight around peak at {peak_t:.1f}s")
+
+    # Offline Speech Hype Detection:
+    if transcriber is not None and a.speech and (not fusion.open or len(fusion.open) < (a.top or 3)):
+        try:
+            res_speech = transcriber.transcribe(path, offset, span)
+            utts_speech = utterances(abs_words(res_speech, offset))
+            speech_hits = []
+            for s0, e0, txt in utts_speech:
+                sc, hits = text_score(txt)
+                if sc >= 0.8:
+                    speech_hits.append(((s0 + e0) / 2.0, sc, hits, txt))
+            if speech_hits:
+                speech_hits.sort(key=lambda x: -x[1])
+                for pos_t, sc, hits, txt in speech_hits[:(a.top or 3)]:
+                    fusion.add(rec, "speech", pos_t, sc, f'speech reaction: "{", ".join(dict.fromkeys(hits))[:40]}"', None, now=0.0)
+                log(f"speech scan: added {len(speech_hits[:(a.top or 3)])} moment(s) from spoken reactions")
+        except Exception:  # noqa: BLE001
+            pass
+
     # AI sweep: ask the vision model for moments that are interesting to LOOK at, even when quiet.
     # Always on with --scan ai, and as a fallback when the sound scan found nothing (needs an AI key).
     sweep_titles = titles if titles is not None else TitleWriter(a)
@@ -3395,6 +3431,9 @@ def run_file(a) -> int:
     cands = sorted(fusion.open, key=lambda mo: -score_moment(mo.ev)[0])
     limit = (a.top * 4) if a.top else len(cands)
     cands = cands[:limit]
+    if cands and (a.top or dur <= 300) and CONF_RANK[a.min_conf] > CONF_RANK["low"]:
+        a.min_conf = "low"
+        log("video mode: adjusted min-conf to 'low' so single-signal moments are preserved")
     log(f"found {len(found)} loud/fast moments -> {len(fusion.open)} candidate moments; checking the best {len(cands)}")
     if a.scan == "fast" and a.motion and cands:
         log("checking the picture around each candidate...")
