@@ -819,6 +819,7 @@ class MediaWatcher(threading.Thread):
         self.status = {}
         self.progress = {}
         self.best_jump = (0.0, 0.0, 0.0)     # biggest sound jump seen: (dB over normal, time, level) - for diagnostics
+        self.best_motion = (0.0, 0.0, 0.0, 0.0) # biggest visual motion: (factor, time, level, baseline)
         self.direct, self.offset, self.span = False, 0.0, None     # video files: let ffmpeg read the file itself
         self.only = None                                           # video files: {'audio'} / {'audio','motion'}
 
@@ -928,8 +929,9 @@ class MediaWatcher(threading.Thread):
     # -- motion -------------------------------------------------------------- #
     def _motion(self, rec) -> None:
         a = self.a
+        m_margin = min(a.motion_factor, 1.8) if (self.span and self.span <= 3600) else a.motion_factor
         det = RiseDetector(step=1.0 / self.FPS, window=180, warmup=a.warmup, cooldown=a.cooldown, settle=2.0,
-                           margin=a.motion_factor, mode="mul", minimum=a.motion_min)
+                           margin=m_margin, mode="mul", minimum=a.motion_min)
         size = self.FRAME_W * self.FRAME_H
         vf = f"fps={self.FPS},scale={self.FRAME_W}:{self.FRAME_H}:flags=area,format=gray"
         proc, logf = self._spawn(rec, ["-an", "-vf", vf, "-f", "rawvideo", "pipe:1"])
@@ -946,6 +948,10 @@ class MediaWatcher(threading.Thread):
                     avg = sum(recent) / len(recent)           # ~2 s average
                     ev = det.feed(n / self.FPS, avg)
                     self.status["motion"] = (avg, det.base)
+                    base_val = max(det.base or 0.5, 0.5)
+                    factor = avg / base_val
+                    if factor > self.best_motion[0]:
+                        self.best_motion = (factor, (n / self.FPS) + self.offset, avg, base_val)
                     if ev:
                         pt, pv, pb = ev
                         self._emit(rec, "motion", pt, pv / max(pb, 0.5),
@@ -3350,13 +3356,15 @@ def run_file(a) -> int:
         events: queue.Queue = queue.Queue()
         mw = MediaWatcher(a, None, stop, events)
         mw.direct, mw.offset, mw.span = True, offset, span
-        if span <= 600 and a.motion:
+        is_deep_visual = (span <= 3600) and getattr(a, "motion", True)
+        if is_deep_visual or a.scan == "full":
             mw.only = {k for k in ("audio", "motion") if getattr(a, k, True)}
+            mode_desc = "deep visual & sound scan (motion + audio from second 0)"
         else:
             mw.only = {k for k in (("audio", "motion") if a.scan == "full" else ("audio",)) if getattr(a, k, True)}
+            mode_desc = "fast audio scan (motion checked around candidate peaks)"
         th = threading.Thread(target=mw.analyze, args=(rec,), daemon=True)
-        log(f"scanning the {'sound' if a.scan == 'fast' else 'sound and picture'} of {span / 60:.0f} minutes "
-            f"({'fast scan: motion is checked later, only around the best moments' if a.scan == 'fast' else 'full scan: slower'})")
+        log(f"scanning {span / 60:.1f} minutes | mode: {mode_desc}")
         t0 = time.time()
         th.start()
         try:
@@ -3413,6 +3421,13 @@ def run_file(a) -> int:
         peak_t = jump[1] if jump[0] > 0 else (dur / 2.0)
         fusion.add(rec, "audio", peak_t, 1.0, f"short video highlight ({dur:.0f}s)", None, now=0.0)
         log(f"short video: video is {dur:.0f}s; clipping highlight around peak at {peak_t:.1f}s")
+
+    # Adaptive Computer Vision Motion Peak:
+    if getattr(mw, "best_motion", (0,))[0] >= 1.4 and (not fusion.open or len(fusion.open) < (a.top or 3)):
+        m_factor, m_t, m_avg, m_base = mw.best_motion
+        fusion.add(rec, "motion", m_t, min(2.0, m_factor / 1.5),
+                   f"peak visual action {m_factor:.1f}x (diff {m_avg:.0f} vs {m_base:.0f})", None, now=0.0)
+        log(f"adaptive scan: captured peak visual action {m_factor:.1f}x at {m_t:.1f}s")
 
     # Offline Speech Hype Detection:
     if transcriber is not None and a.speech and (not fusion.open or len(fusion.open) < (a.top or 3)):
