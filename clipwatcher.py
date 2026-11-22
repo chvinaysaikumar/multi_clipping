@@ -2114,8 +2114,21 @@ class ClipMaker:
                 post = reaction_end(lv, 0.5, lo, pos, a.min_post, a.max_post)
                 log(f"      clip length: the action lasted ~{post:.0f}s after the moment")
         end = min(pos + post, have)
-        if have <= 65.0:
-            start, end = 0.0, have
+        clip_max_len = a.max_len
+
+        # Short video copyright & fair-use rule:
+        # Never take 100% of a short video (avoids Content ID duplicate video flags / copyright matches).
+        # For videos under 90s, extract a punchy highlight capped at ~25-30s.
+        if have <= 90.0:
+            target_dur = min(30.0, max(18.0, have * 0.60))
+            clip_max_len = min(clip_max_len, 32.0)
+            start = max(0.0, pos - (target_dur * 0.45))
+            end = min(have, start + target_dur)
+            if end >= have:
+                start = max(0.0, have - target_dur)
+                end = have
+            elif start == 0.0:
+                end = min(have, target_dur)
 
         # What was said? One speech-to-text pass over the whole area around the moment gives us the sentences
         # (so we never cut mid-sentence), the speech check, the captions and the AI's transcript.
@@ -2144,14 +2157,16 @@ class ClipMaker:
 
         hi = min(have, end + 8.0)
         if utts:                                           # sentence-aware cut
-            start, end = sentence_bounds(utts, start, end, pos, ctx_lo, hi, a.max_len)
-            wide = sentence_bounds(utts, ctx_lo, end, pos, ctx_lo, hi, a.max_len)
+            start, end = sentence_bounds(utts, start, end, pos, ctx_lo, hi, clip_max_len)
+            wide = sentence_bounds(utts, ctx_lo, end, pos, ctx_lo, hi, clip_max_len)
         else:
             if not a.no_snap:                              # no speech found: at least don't cut inside a sound
                 s2 = snap_to_pause(rec.path, start, 3.0, 3.0)
                 e2 = min(snap_to_pause(rec.path, end, 1.0, SNAP_FWD), have)
                 if e2 - s2 >= 3 and s2 < pos < e2:
                     start, end = s2, e2
+            if end - start > clip_max_len:
+                end = min(have, start + clip_max_len)
             wide = (start, end)
         length = end - start
         if length < 3:
