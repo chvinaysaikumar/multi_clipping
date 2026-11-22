@@ -75,7 +75,16 @@ def read_env(here: Path) -> dict:
 
 def key_state(here: Path) -> dict:
     env = read_env(here)
-    return {n: bool(env.get(v) or os.environ.get(v)) for n, v in KEY_NAMES.items()}
+    res = {}
+    for n, v in KEY_NAMES.items():
+        val = env.get(v) or os.environ.get(v, "")
+        if n == "gemini":
+            res[n] = bool(val and (val.startswith("AIzaSy") or len(val) >= 20))
+        elif n == "anthropic":
+            res[n] = bool(val and val.startswith("sk-ant-") and len(val) >= 30)
+        else:
+            res[n] = bool(val)
+    return res
 
 
 def save_key(here: Path, name: str, value: str) -> bool:
@@ -1514,23 +1523,28 @@ pre.doc {
   <div class="card">
     <div class="card-title" style="margin-bottom:12px;"><span>☁️</span> Google Drive & Cloud Auto-Sync</div>
     <p style="font-size:13.5px; color:var(--text-muted); margin-bottom:14px;">
-      Automatically mirrors your highest-resolution vertical clips, thumbnails, subtitles, and viral social post texts directly to a shared Google Drive or OneDrive folder. Your editing & posting team gets instant access to full-quality videos without unzipping files or visiting any web page.
+      Automatically mirrors your highest-resolution vertical clips, thumbnails, subtitles, and viral social post texts directly to your shared Google Drive or OneDrive subfolders (<code>/cricket</code>, <code>/gaming</code>, <code>/movies</code>).
     </p>
+    <div style="background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.25); border-radius:8px; padding:12px 14px; margin-bottom:14px; font-size:13px; color:#cbd5e1; line-height:1.5;">
+      💡 <b>Important:</b> Windows saves files to a <b>local folder path</b> (e.g. <code>G:\My Drive\clip</code> or <code>C:\Users\vinay\OneDrive\clip</code>), which cloud software automatically uploads to Google Drive. Do not paste <code>https://drive.google.com/...</code> browser URLs.
+      <br><span style="margin-top:4px; display:inline-block;">• <b>Google Drive:</b> Install <a href="https://www.google.com/drive/download/" target="_blank" style="color:var(--accent-cyan); font-weight:600;">Google Drive for Desktop (Free) ↗</a> so it appears as <b>G:\My Drive</b> on your PC.</span>
+      <br>• <b>OneDrive:</b> Already active on your PC at <code>C:\Users\vinay\OneDrive</code>.
+    </div>
     <div>
       <label for="sync_dir">
-        Google Drive / Cloud Folder Path:
+        Local Cloud Folder Path:
         <span style="font-size:12px; color:var(--text-muted); font-weight:normal; margin-left:8px;">
-          (e.g. <code>G:\My Drive\Viral_Clips</code> or <code>C:\Users\vinay\OneDrive\Viral_Clips</code>)
+          (e.g. <code>G:\My Drive\clip</code> or <code>C:\Users\vinay\OneDrive\clip</code>)
         </span>
       </label>
       <div style="display:flex; gap:10px; align-items:center;">
-        <input id="sync_dir" type="text" placeholder="G:\My Drive\Viral_Clips" style="flex:1;">
+        <input id="sync_dir" type="text" placeholder="G:\My Drive\clip" style="flex:1;">
         <button class="btn" style="white-space:nowrap;" onclick="testDriveSync()">Test & Sync Now</button>
       </div>
     </div>
     <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
-      <button class="btn" style="padding:4px 10px; font-size:12px;" onclick="setSyncPreset('gdrive')">Use Google Drive (G:\)</button>
-      <button class="btn" style="padding:4px 10px; font-size:12px;" onclick="setSyncPreset('onedrive')">Use OneDrive</button>
+      <button class="btn" style="padding:4px 10px; font-size:12px;" onclick="setSyncPreset('gdrive')">Use Google Drive (G:\My Drive\clip)</button>
+      <button class="btn" style="padding:4px 10px; font-size:12px;" onclick="setSyncPreset('onedrive')">Use OneDrive (Active on PC)</button>
       <button class="btn" style="padding:4px 10px; font-size:12px;" onclick="setSyncPreset('desktop')">Use Desktop Folder</button>
     </div>
     <span id="sync_status_msg" style="display:block; margin-top:10px; font-size:13px; font-weight:600;"></span>
@@ -1940,9 +1954,9 @@ $("#doctor").onclick = async () => {
 function setSyncPreset(type) {
   const input = $("#sync_dir");
   if (!input) return;
-  if (type === 'gdrive') input.value = "G:\\My Drive\\Viral_Clips";
-  else if (type === 'onedrive') input.value = "C:\\Users\\vinay\\OneDrive\\Viral_Clips";
-  else if (type === 'desktop') input.value = "C:\\Users\\vinay\\Desktop\\Viral_Clips";
+  if (type === 'gdrive') input.value = "G:\\My Drive\\clip";
+  else if (type === 'onedrive') input.value = "C:\\Users\\vinay\\OneDrive\\clip";
+  else if (type === 'desktop') input.value = "C:\\Users\\vinay\\Desktop\\clip";
   api("/api/settings", form());
   const msg = $("#sync_status_msg");
   if (msg) { msg.style.color = "var(--accent-cyan)"; msg.textContent = `Preset set: ${input.value}`; }
@@ -1950,9 +1964,17 @@ function setSyncPreset(type) {
 
 async function testDriveSync() {
   const msg = $("#sync_status_msg");
+  const val = ($("#sync_dir").value || "").trim();
+  if (val.startsWith("http://") || val.startsWith("https://")) {
+    if (msg) {
+      msg.style.color = "var(--danger)";
+      msg.innerHTML = "⚠️ You pasted a web browser link! Auto-sync needs your local folder on Windows (e.g. <code>G:\\My Drive\\clip</code>).<br>Install <b>Google Drive for Desktop</b> to get a G:\\ drive, or click <b>Use OneDrive</b> which is already active on your PC.";
+    }
+    return;
+  }
   if (msg) { msg.style.color = "var(--text-muted)"; msg.textContent = "Testing & syncing..."; }
   await api("/api/settings", form());
-  const res = await api("/api/sync-drive", { sync_dir: $("#sync_dir").value });
+  const res = await api("/api/sync-drive", { sync_dir: val });
   if (msg) {
     if (res.ok) {
       msg.style.color = "var(--success)";
@@ -2198,6 +2220,11 @@ def make_handler(here: Path, clip_dir: Path, token: str, runner: Runner):
                 sync_target = (body.get("sync_dir") or load_settings(here).get("sync_dir", "")).strip()
                 if not sync_target:
                     return self._json({"ok": False, "error": "No cloud sync folder configured in Setup tab."})
+                if sync_target.startswith("http://") or sync_target.startswith("https://"):
+                    return self._json({
+                        "ok": False,
+                        "error": "You entered a web browser link! Google Drive auto-sync requires the local folder path on your computer (e.g. 'G:\\My Drive\\clip'). Install Google Drive for Desktop to get a G:\\ drive, or click 'Use OneDrive' which is already active."
+                    })
                 try:
                     sync_p = Path(sync_target)
                     sync_p.mkdir(parents=True, exist_ok=True)
