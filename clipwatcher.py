@@ -2375,22 +2375,39 @@ class ClipMaker:
             write_srt(cues, info_dir(dst) / f"{base}.srt")
         save_post(dst, res if res["title"] else dict(res, title=title), transcript)
 
+        # Resolve destination category (cricket, gaming, movies, etc.)
+        cat = getattr(a, "category", "") or "auto"
+        if cat.lower() == "auto":
+            prof = (getattr(a, "profile", "") or "").lower()
+            text_to_check = f"{title} {getattr(a, 'stream_title', '')} {getattr(a, 'channel', '')} {dst.name}".lower()
+            if prof == "cricket" or any(k in text_to_check for k in ("cricket", "wicket", "six", "ipl", "t20", "bowled", "catch")):
+                cat = "cricket"
+            elif prof == "gaming" or any(k in text_to_check for k in ("game", "gameplay", "valorant", "minecraft", "gta", "twitch", "streamer", "speed")):
+                cat = "gaming"
+            elif prof == "movies" or any(k in text_to_check for k in ("movie", "film", "scene", "cinema", "trailer", "dialogue", "hollywood", "bollywood", "actor")):
+                cat = "movies"
+            elif prof:
+                cat = prof
+            else:
+                cat = ""
+
         sync_target = getattr(a, "sync_dir", None)
         if sync_target:
             try:
                 sync_p = Path(sync_target)
-                sync_p.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(str(dst), str(sync_p / dst.name))
+                dest_p = sync_p / cat if cat else sync_p
+                dest_p.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(dst), str(dest_p / dst.name))
                 thumb_f = info_dir(dst) / f"{base}.jpg"
                 if thumb_f.exists():
-                    shutil.copy2(str(thumb_f), str(sync_p / f"{base}.jpg"))
+                    shutil.copy2(str(thumb_f), str(dest_p / f"{base}.jpg"))
                 srt_f = info_dir(dst) / f"{base}.srt"
                 if srt_f.exists():
-                    shutil.copy2(str(srt_f), str(sync_p / f"{base}.srt"))
+                    shutil.copy2(str(srt_f), str(dest_p / f"{base}.srt"))
                 post_f = info_dir(dst) / f"{base}_post.txt"
                 if post_f.exists():
-                    shutil.copy2(str(post_f), str(sync_p / f"{base}_post.txt"))
-                log(f"drive: synced '{dst.name}' to {sync_p}")
+                    shutil.copy2(str(post_f), str(dest_p / f"{base}_post.txt"))
+                log(f"drive: synced '{dst.name}' -> [{cat or 'root'}] ({dest_p})")
             except Exception as e:  # noqa: BLE001
                 log(f"drive: sync error ({e})")
 
@@ -2402,6 +2419,7 @@ class ClipMaker:
         v_metrics = compute_virality_metrics(score, m.ev, res.get("rating"), transcript, length)
         meta = {
             "time": datetime.now().isoformat(timespec="seconds"),
+            "category": cat, "profile": getattr(a, "profile", ""),
             "platform": a.platform, "channel": a.channel,
             "stream_title": getattr(a, "stream_title", ""), "clip": dst.name,
             "title": title, "ai_rating": res["rating"], "ai_reason": res["reason"],
@@ -2866,6 +2884,8 @@ PROFILES = {
     "highlights": dict(layout="crop", min_conf="high", cooldown=60.0),
     "cricket": dict(layout="crop", audio_db=8.0, min_conf="med", pre=12.0, post=14.0,
                     hype_words="six,out,bowled,caught,wicket,four,boundary,century,catch,unbelievable,review"),
+    "movies": dict(layout="crop", audio_db=6.0, min_conf="med", pre=12.0, post=14.0,
+                   hype_words="scene,action,dialogue,fight,explosion,dramatic,climax,hero,entry"),
     "sports": dict(layout="crop", audio_db=8.0, min_conf="med", pre=10.0, post=14.0,
                    hype_words="goal,six,out,wicket,touchdown,save,penalty,unbelievable,insane"),
     "podcast": dict(layout="podcast", min_conf="med", audio_db=4.0, pre=14.0, post=16.0),
@@ -2995,6 +3015,8 @@ def parse_args(argv=None):
     g.add_argument("--clip-dir", type=Path, default=HERE / "clips")
     g.add_argument("--sync-dir", type=Path, default=None,
                    help="auto-sync clips to a Google Drive or cloud sync folder (e.g. 'G:\\My Drive\\Viral_Clips')")
+    g.add_argument("--category", default="auto",
+                   help="destination category / subfolder in Google Drive (e.g. 'cricket', 'gaming', 'movies', or 'auto')")
     g.add_argument("--webhook", default="", help="Discord webhook URL to ping when a clip is ready")
     p.add_argument("--ui", action="store_true", help="open the web interface (start runs, watch the log, review clips)")
     p.add_argument("--review", action="store_true", help="open the web interface on the Clips tab")

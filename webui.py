@@ -36,10 +36,10 @@ for _cand in (HERE / ".venv" / "Scripts", HERE / ".venv" / "bin",
     if _cand.exists() and str(_cand) not in os.environ.get("PATH", ""):
         os.environ["PATH"] = str(_cand) + os.pathsep + os.environ.get("PATH", "")
 
-PROFILES = ["gaming", "cricket", "sports", "podcast", "just-chatting", "irl", "highlights"]
+PROFILES = ["gaming", "cricket", "movies", "sports", "podcast", "just-chatting", "irl", "highlights"]
 LAYOUTS = ["crop", "blur", "split", "podcast"]
 KEY_NAMES = {"gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
-DEFAULTS = {"source": "live", "top": "", "range": "", "url": "", "url2": "", "url3": "", "url4": "", "profile": "highlights", "layout": "crop", "cam": "mid-left", "quality": "2k", "streamer": "", "min_conf": "", "min_rating": "",
+DEFAULTS = {"source": "live", "top": "", "range": "", "url": "", "url2": "", "url3": "", "url4": "", "profile": "highlights", "category": "auto", "layout": "crop", "cam": "mid-left", "quality": "2k", "streamer": "", "min_conf": "", "min_rating": "",
             "caption_style": "", "style": "", "extra": "", "sync_dir": ""}
 BAD_EXTRA = {"--ui", "--review", "--selftest", "--doctor", "--preview", "--stop-file"}
 
@@ -249,6 +249,9 @@ def build_jobs(s: dict, here: Path, stop_file: Path | None = None) -> tuple[list
             shared_args += ["--caption-style", cs]
         if sty:
             shared_args += ["--style", sty]
+        cat = (s.get("category") or "").strip()
+        if cat:
+            shared_args += ["--category", cat]
         sd = (s.get("sync_dir") or "").strip()
         if sd:
             shared_args += ["--sync-dir", sd]
@@ -1327,17 +1330,28 @@ pre.doc {
     </div>
 
     <!-- Primary Studio Settings -->
-    <div class="grid-3">
+    <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
       <div>
         <label for="profile">Kind of Stream Profile</label>
         <select id="profile">
           <option value="podcast">Podcast / Interview (Two-Person Talk)</option>
           <option value="gaming">Gaming (face cam + gameplay)</option>
           <option value="cricket">Cricket / Sports (wickets, sixes, crowd roar)</option>
+          <option value="movies">Movies & Cinema (Action scenes, dialogue, fight)</option>
           <option value="just-chatting">Just chatting</option>
           <option value="irl">IRL / walking</option>
           <option value="highlights">Only the best (strict)</option>
           <option value="">No preset</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="category">Drive Subfolder / Category</label>
+        <select id="category">
+          <option value="auto">⚡ Auto (Match Profile: Cricket, Gaming, Movies)</option>
+          <option value="cricket">🏏 Cricket (Drive /cricket)</option>
+          <option value="gaming">🎮 Gaming (Drive /gaming)</option>
+          <option value="movies">🎬 Movies (Drive /movies)</option>
         </select>
       </div>
 
@@ -1553,7 +1567,7 @@ async function api(path, body) {
   return res.json();
 }
 
-const F = ["source","top","range","url","url2","url3","url4","profile","layout","cam","quality","streamer","min_conf","min_rating","caption_style","style","extra","sync_dir"];
+const F = ["source","top","range","url","url2","url3","url4","profile","category","layout","cam","quality","streamer","min_conf","min_rating","caption_style","style","extra","sync_dir"];
 
 function tab(t) {
   $$("section").forEach(s => s.classList.add("hide"));
@@ -1942,7 +1956,7 @@ async function testDriveSync() {
   if (msg) {
     if (res.ok) {
       msg.style.color = "var(--success)";
-      msg.textContent = `✅ Successfully synced ${res.count} files to: ${res.path}`;
+      msg.textContent = `✅ Successfully synced ${res.count} files (${res.summary || ''}) to: ${res.path}`;
     } else {
       msg.style.color = "var(--danger)";
       msg.textContent = `❌ Error: ${res.error}`;
@@ -1957,7 +1971,7 @@ async function syncToDrive() {
   try {
     const res = await api("/api/sync-drive", {});
     if (res.ok) {
-      alert(`✅ Successfully synced ${res.count} items to Google Drive!\nPath: ${res.path}`);
+      alert(`✅ Successfully synced ${res.count} items into respective category folders!\nFolders: ${res.summary || 'Synced'}\nPath: ${res.path}`);
     } else {
       alert(`⚠️ Sync failed: ${res.error}\n\nTip: Enter your Google Drive folder in the 'Setup' tab (e.g. G:\\My Drive\\Viral_Clips).`);
     }
@@ -2187,18 +2201,61 @@ def make_handler(here: Path, clip_dir: Path, token: str, runner: Runner):
                 try:
                     sync_p = Path(sync_target)
                     sync_p.mkdir(parents=True, exist_ok=True)
+                    clips = review.load_clips(clip_dir)
                     count = 0
-                    for f in clip_dir.glob("*"):
-                        if f.is_file() and f.suffix.lower() in (".mp4", ".jpg", ".srt", ".txt", ".json"):
-                            shutil.copy2(str(f), str(sync_p / f.name))
-                            count += 1
-                    info_d = clip_dir / ".info"
-                    if info_d.exists():
-                        for f in info_d.glob("*"):
-                            if f.is_file():
+                    cat_counts = collections.defaultdict(int)
+
+                    def get_clip_cat(c: dict) -> str:
+                        cat = (c.get("category") or "").strip().lower()
+                        if cat and cat != "auto":
+                            return cat
+                        prof = (c.get("profile") or "").strip().lower()
+                        text = f"{c.get('title','')} {c.get('description','')} {c.get('clip','')} {c.get('channel','')} {c.get('stream_title','')}".lower()
+                        if prof == "cricket" or any(w in text for w in ("cricket", "wicket", "six", "ipl", "t20", "bowled", "catch")):
+                            return "cricket"
+                        if prof == "gaming" or any(w in text for w in ("game", "gaming", "valorant", "minecraft", "gta", "speed", "streamer")):
+                            return "gaming"
+                        if prof == "movies" or any(w in text for w in ("movie", "film", "cinema", "scene", "trailer", "dialogue", "actor", "hero")):
+                            return "movies"
+                        return prof if prof in ("cricket", "gaming", "movies") else ""
+
+                    for c in clips:
+                        vname = c.get("video") or c.get("clip")
+                        if not vname:
+                            continue
+                        src_vid = clip_dir / vname
+                        if not src_vid.exists():
+                            continue
+                        cat = get_clip_cat(c)
+                        dest_d = sync_p / cat if cat else sync_p
+                        dest_d.mkdir(parents=True, exist_ok=True)
+
+                        stem = Path(vname).stem
+                        shutil.copy2(str(src_vid), str(dest_d / src_vid.name))
+                        count += 1
+                        if cat:
+                            cat_counts[cat] += 1
+                        for cand_t in (clip_dir / ".info" / f"{stem}.jpg", clip_dir / f"{stem}.jpg"):
+                            if cand_t.exists():
+                                shutil.copy2(str(cand_t), str(dest_d / cand_t.name))
+                                count += 1
+                        for cand_s in (clip_dir / ".info" / f"{stem}.srt", clip_dir / f"{stem}.srt"):
+                            if cand_s.exists():
+                                shutil.copy2(str(cand_s), str(dest_d / cand_s.name))
+                                count += 1
+                        for cand_p in (clip_dir / ".info" / f"{stem}_post.txt", clip_dir / f"{stem}_post.txt"):
+                            if cand_p.exists():
+                                shutil.copy2(str(cand_p), str(dest_d / cand_p.name))
+                                count += 1
+
+                    if not clips:
+                        for f in clip_dir.glob("*"):
+                            if f.is_file() and f.suffix.lower() in (".mp4", ".jpg", ".srt", ".txt", ".json"):
                                 shutil.copy2(str(f), str(sync_p / f.name))
                                 count += 1
-                    return self._json({"ok": True, "count": count, "path": str(sync_p)})
+
+                    summary = ", ".join(f"{k}: {v} reels" for k, v in cat_counts.items()) if cat_counts else f"{count} files"
+                    return self._json({"ok": True, "count": count, "summary": summary, "path": str(sync_p)})
                 except Exception as e:
                     return self._json({"ok": False, "error": str(e)})
             if path == "/api/open-folder":
