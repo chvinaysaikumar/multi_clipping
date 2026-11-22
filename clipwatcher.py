@@ -2375,6 +2375,25 @@ class ClipMaker:
             write_srt(cues, info_dir(dst) / f"{base}.srt")
         save_post(dst, res if res["title"] else dict(res, title=title), transcript)
 
+        sync_target = getattr(a, "sync_dir", None)
+        if sync_target:
+            try:
+                sync_p = Path(sync_target)
+                sync_p.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(dst), str(sync_p / dst.name))
+                thumb_f = info_dir(dst) / f"{base}.jpg"
+                if thumb_f.exists():
+                    shutil.copy2(str(thumb_f), str(sync_p / f"{base}.jpg"))
+                srt_f = info_dir(dst) / f"{base}.srt"
+                if srt_f.exists():
+                    shutil.copy2(str(srt_f), str(sync_p / f"{base}.srt"))
+                post_f = info_dir(dst) / f"{base}_post.txt"
+                if post_f.exists():
+                    shutil.copy2(str(post_f), str(sync_p / f"{base}_post.txt"))
+                log(f"drive: synced '{dst.name}' to {sync_p}")
+            except Exception as e:  # noqa: BLE001
+                log(f"drive: sync error ({e})")
+
         self.made += 1
         self.results.append((score, conf, dst.name))
         log(f"CLIP  {dst.name}  [{conf.upper()} {score:.1f}]  {why}  ({length:.0f}s, encoded in {time.time() - t_enc:.0f}s)")
@@ -2974,6 +2993,8 @@ def parse_args(argv=None):
     g = p.add_argument_group("output")
     g.add_argument("--rec-dir", type=Path, default=HERE / "rec")
     g.add_argument("--clip-dir", type=Path, default=HERE / "clips")
+    g.add_argument("--sync-dir", type=Path, default=None,
+                   help="auto-sync clips to a Google Drive or cloud sync folder (e.g. 'G:\\My Drive\\Viral_Clips')")
     g.add_argument("--webhook", default="", help="Discord webhook URL to ping when a clip is ready")
     p.add_argument("--ui", action="store_true", help="open the web interface (start runs, watch the log, review clips)")
     p.add_argument("--review", action="store_true", help="open the web interface on the Clips tab")

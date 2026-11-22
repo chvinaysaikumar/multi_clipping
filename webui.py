@@ -16,6 +16,7 @@ import os
 import re
 import secrets
 import shlex
+import shutil
 import subprocess
 import sys
 import threading
@@ -39,7 +40,7 @@ PROFILES = ["gaming", "cricket", "sports", "podcast", "just-chatting", "irl", "h
 LAYOUTS = ["crop", "blur", "split", "podcast"]
 KEY_NAMES = {"gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
 DEFAULTS = {"source": "live", "top": "", "range": "", "url": "", "url2": "", "url3": "", "url4": "", "profile": "highlights", "layout": "crop", "cam": "mid-left", "quality": "2k", "streamer": "", "min_conf": "", "min_rating": "",
-            "caption_style": "", "style": "", "extra": ""}
+            "caption_style": "", "style": "", "extra": "", "sync_dir": ""}
 BAD_EXTRA = {"--ui", "--review", "--selftest", "--doctor", "--preview", "--stop-file"}
 
 
@@ -248,6 +249,9 @@ def build_jobs(s: dict, here: Path, stop_file: Path | None = None) -> tuple[list
             shared_args += ["--caption-style", cs]
         if sty:
             shared_args += ["--style", sty]
+        sd = (s.get("sync_dir") or "").strip()
+        if sd:
+            shared_args += ["--sync-dir", sd]
         if parts:
             shared_args += parts
 
@@ -1494,6 +1498,31 @@ pre.doc {
   </div>
 
   <div class="card">
+    <div class="card-title" style="margin-bottom:12px;"><span>☁️</span> Google Drive & Cloud Auto-Sync</div>
+    <p style="font-size:13.5px; color:var(--text-muted); margin-bottom:14px;">
+      Automatically mirrors your highest-resolution vertical clips, thumbnails, subtitles, and viral social post texts directly to a shared Google Drive or OneDrive folder. Your editing & posting team gets instant access to full-quality videos without unzipping files or visiting any web page.
+    </p>
+    <div>
+      <label for="sync_dir">
+        Google Drive / Cloud Folder Path:
+        <span style="font-size:12px; color:var(--text-muted); font-weight:normal; margin-left:8px;">
+          (e.g. <code>G:\My Drive\Viral_Clips</code> or <code>C:\Users\vinay\OneDrive\Viral_Clips</code>)
+        </span>
+      </label>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <input id="sync_dir" type="text" placeholder="G:\My Drive\Viral_Clips" style="flex:1;">
+        <button class="btn" style="white-space:nowrap;" onclick="testDriveSync()">Test & Sync Now</button>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+      <button class="btn" style="padding:4px 10px; font-size:12px;" onclick="setSyncPreset('gdrive')">Use Google Drive (G:\)</button>
+      <button class="btn" style="padding:4px 10px; font-size:12px;" onclick="setSyncPreset('onedrive')">Use OneDrive</button>
+      <button class="btn" style="padding:4px 10px; font-size:12px;" onclick="setSyncPreset('desktop')">Use Desktop Folder</button>
+    </div>
+    <span id="sync_status_msg" style="display:block; margin-top:10px; font-size:13px; font-weight:600;"></span>
+  </div>
+
+  <div class="card">
     <div class="card-header" style="margin-bottom:12px;">
       <div class="card-title"><span>🩺</span> System Engine Diagnostic</div>
       <button class="btn" id="doctor">Run Health Check</button>
@@ -1524,7 +1553,7 @@ async function api(path, body) {
   return res.json();
 }
 
-const F = ["source","top","range","url","url2","url3","url4","profile","layout","cam","quality","streamer","min_conf","min_rating","caption_style","style","extra"];
+const F = ["source","top","range","url","url2","url3","url4","profile","layout","cam","quality","streamer","min_conf","min_rating","caption_style","style","extra","sync_dir"];
 
 function tab(t) {
   $$("section").forEach(s => s.classList.add("hide"));
@@ -1773,6 +1802,7 @@ function renderClips() {
       <option value="new" ${SORT == 'new' ? 'selected' : ''}>⏱ Newest First</option>
     </select>
     <a href="/api/export-zip?token=${encodeURIComponent(TOKEN)}" class="btn" style="padding:7px 14px; font-size:13px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; background:linear-gradient(135deg, #10b981, #059669); color:#fff; border:none; font-weight:600; border-radius:8px;" download>📦 Download All (ZIP)</a>
+    <button id="btn-sync-drive" class="btn" style="padding:7px 14px; font-size:13px; display:inline-flex; align-items:center; gap:6px; background:linear-gradient(135deg, #3b82f6, #1d4ed8); color:#fff; border:none; font-weight:600; border-radius:8px;" onclick="syncToDrive()">☁️ Sync to Drive</button>
     <button class="btn" style="padding:7px 14px; font-size:13px;" onclick="api('/api/open-folder',{})">📁 Open Folder</button>
     ${GONE.length ? `<button class="btn" style="padding:7px 14px; font-size:13px;" onclick="showGone()">Deleted (${GONE.length})</button>` : ''}
   `;
@@ -1892,6 +1922,51 @@ $("#doctor").onclick = async () => {
   $("#doc").textContent = "Running diagnostic inspection...";
   $("#doc").textContent = (await api("/api/doctor")).text;
 };
+
+function setSyncPreset(type) {
+  const input = $("#sync_dir");
+  if (!input) return;
+  if (type === 'gdrive') input.value = "G:\\My Drive\\Viral_Clips";
+  else if (type === 'onedrive') input.value = "C:\\Users\\vinay\\OneDrive\\Viral_Clips";
+  else if (type === 'desktop') input.value = "C:\\Users\\vinay\\Desktop\\Viral_Clips";
+  api("/api/settings", form());
+  const msg = $("#sync_status_msg");
+  if (msg) { msg.style.color = "var(--accent-cyan)"; msg.textContent = `Preset set: ${input.value}`; }
+}
+
+async function testDriveSync() {
+  const msg = $("#sync_status_msg");
+  if (msg) { msg.style.color = "var(--text-muted)"; msg.textContent = "Testing & syncing..."; }
+  await api("/api/settings", form());
+  const res = await api("/api/sync-drive", { sync_dir: $("#sync_dir").value });
+  if (msg) {
+    if (res.ok) {
+      msg.style.color = "var(--success)";
+      msg.textContent = `✅ Successfully synced ${res.count} files to: ${res.path}`;
+    } else {
+      msg.style.color = "var(--danger)";
+      msg.textContent = `❌ Error: ${res.error}`;
+    }
+  }
+}
+
+async function syncToDrive() {
+  const btn = $("#btn-sync-drive");
+  const orig = btn ? btn.textContent : "";
+  if (btn) btn.textContent = "⏳ Syncing...";
+  try {
+    const res = await api("/api/sync-drive", {});
+    if (res.ok) {
+      alert(`✅ Successfully synced ${res.count} items to Google Drive!\nPath: ${res.path}`);
+    } else {
+      alert(`⚠️ Sync failed: ${res.error}\n\nTip: Enter your Google Drive folder in the 'Setup' tab (e.g. G:\\My Drive\\Viral_Clips).`);
+    }
+  } catch (e) {
+    alert(`⚠️ Sync error: ${e}`);
+  } finally {
+    if (btn) btn.textContent = orig;
+  }
+}
 
 // Form Auto-save
 F.forEach(k => {
@@ -2105,6 +2180,27 @@ def make_handler(here: Path, clip_dir: Path, token: str, runner: Runner):
             if path == "/api/decision":
                 ok = review.decide(clip_dir, str(body.get("clip", "")), str(body.get("decision", "")))
                 return self._json({"ok": ok}, 200 if ok else 400)
+            if path == "/api/sync-drive":
+                sync_target = (body.get("sync_dir") or load_settings(here).get("sync_dir", "")).strip()
+                if not sync_target:
+                    return self._json({"ok": False, "error": "No cloud sync folder configured in Setup tab."})
+                try:
+                    sync_p = Path(sync_target)
+                    sync_p.mkdir(parents=True, exist_ok=True)
+                    count = 0
+                    for f in clip_dir.glob("*"):
+                        if f.is_file() and f.suffix.lower() in (".mp4", ".jpg", ".srt", ".txt", ".json"):
+                            shutil.copy2(str(f), str(sync_p / f.name))
+                            count += 1
+                    info_d = clip_dir / ".info"
+                    if info_d.exists():
+                        for f in info_d.glob("*"):
+                            if f.is_file():
+                                shutil.copy2(str(f), str(sync_p / f.name))
+                                count += 1
+                    return self._json({"ok": True, "count": count, "path": str(sync_p)})
+                except Exception as e:
+                    return self._json({"ok": False, "error": str(e)})
             if path == "/api/open-folder":
                 return self._json({"ok": open_folder(clip_dir)})
             self._json({"error": "not found"}, 404)
