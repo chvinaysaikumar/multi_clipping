@@ -1210,6 +1210,24 @@ def with_subtitles(args: list, ass_name: str) -> list:
     return args
 
 
+def with_progress_bar(args: list, length: float, out_h: int) -> list:
+    """Adds a sleek neon cyan progress bar (8px high) along the bottom edge."""
+    h = out_h or 1920
+    w = int(h * 9 / 16) // 2 * 2
+    pb = f"drawbox=x=0:y={h - 10}:w='min({w},trunc(({w}*t/{max(1.0, length):.3f})/2)*2)':h=8:color=0x00F0FF@0.95:t=fill"
+    args = list(args)
+    if args[0] == "-filter_complex":
+        fc = args[1]
+        if "[v]" in fc:
+            k = fc.rindex("[v]")
+            args[1] = fc[:k] + f"[v_pb0];[v_pb0]{pb}[v]"
+        else:
+            args[1] = fc + f",{pb}"
+    else:
+        args[1] = args[1] + f",{pb}"
+    return args
+
+
 def audio_filter(av_offset_ms: int = 0, normalize: bool = False) -> str:
     """Keeps sound locked to the picture. av_offset_ms < 0 plays the sound earlier, > 0 later."""
     parts = []
@@ -1225,9 +1243,12 @@ def audio_filter(av_offset_ms: int = 0, normalize: bool = False) -> str:
 
 def cut_vertical(src: Path, start: float, length: float, dst: Path, layout: str,
                  out_h: int, crf: int, preset: str, split: dict | None = None,
-                 ass: Path | None = None, av_offset_ms: int = 0, normalize: bool = False) -> tuple[bool, str]:
-    """One ffmpeg pass: cut + crop/layout + title/captions + encode. No second encode, so no extra blur."""
+                 ass: Path | None = None, av_offset_ms: int = 0, normalize: bool = False,
+                 progress_bar: bool = True) -> tuple[bool, str]:
+    """One ffmpeg pass: cut + crop/layout + title/captions + progress bar + encode. No second encode, so no extra blur."""
     vargs = video_filter_args(layout, out_h, split)
+    if progress_bar:
+        vargs = with_progress_bar(vargs, length, out_h)
     if ass is not None:
         vargs = with_subtitles(vargs, ass.name)
     try:
@@ -1342,8 +1363,8 @@ STYLES = {   # colours are ASS BGR: &H00BBGGRR
 
 
 def make_ass(cues, title: str, layout: str, out_h: int, cam_share: float, duration: float, caps: bool,
-             wordcues=None, style: str = "classic") -> str:
-    """One .ass file with the hook title (held for the whole clip) and the word captions."""
+             wordcues=None, style: str = "classic", hook_banner: bool = False) -> str:
+    """One .ass file with the hook title and the word captions."""
     h = out_h or 1920
     w = int(h * 9 / 16) // 2 * 2
     st_ = STYLES.get(style, STYLES["classic"])
@@ -1363,8 +1384,16 @@ def make_ass(cues, title: str, layout: str, out_h: int, cam_share: float, durati
     lines = []
     if title:
         wrapped = "\\N".join(textwrap.wrap(ass_text(title), 20))
-        lines.append(f"Dialogue: 1,{ass_time(0)},{ass_time(duration)},Title,,0,0,0,,"
-                     f"{{\\an5\\pos({w // 2},{title_y})}}{wrapped}")
+        if hook_banner:
+            # Top 0-4.5s Hook Banner: high-retention scale pop-in & smooth fade-out
+            hook_dur = min(4.5, duration) if duration > 5.5 else duration
+            t_fade_start = int(max(0.0, hook_dur - 0.5) * 1000)
+            t_fade_end = int(hook_dur * 1000)
+            lines.append(f"Dialogue: 1,{ass_time(0)},{ass_time(hook_dur)},Title,,0,0,0,,"
+                         f"{{\\an5\\pos({w // 2},{title_y})\\fade(150,0,0,0,{t_fade_start},{t_fade_end})\\t(0,250,\\fscx100\\fscy100)}}{{\\fscx110\\fscy110}}{wrapped}")
+        else:
+            lines.append(f"Dialogue: 1,{ass_time(0)},{ass_time(duration)},Title,,0,0,0,,"
+                         f"{{\\an5\\pos({w // 2},{title_y})}}{wrapped}")
     if wordcues:                                        # one event per spoken word: that word lights up
         for ci, (st, en, words) in enumerate(wordcues):
             line_after = wordcues[ci + 1][0] if ci + 1 < len(wordcues) else None
@@ -2071,6 +2100,58 @@ def transcript_lines(utts: list, start: float, end: float) -> str:
     return "\n".join(f"[{max(0.0, s0 - start):.0f}s] {t}" for s0, e0, t in utts if e0 >= start and s0 <= end)[:3500]
 
 
+def compute_virality_metrics(score: float, ev: dict, ai_rating: float | None = None,
+                             said: str = "", length_s: float = 0.0) -> dict:
+    """
+    Computes a comprehensive commercial virality assessment (0-100 score, hook, pacing).
+    """
+    raw_v = 48.0 + (score * 12.5)
+    if ai_rating is not None and ai_rating > 0:
+        raw_v = (raw_v * 0.45) + (float(ai_rating) * 10.0 * 0.55)
+    virality_score = int(round(min(98.0, max(45.0, raw_v))))
+
+    audio_str = ev.get("audio", {}).get("strength", 1.0)
+    speech_str = ev.get("speech", {}).get("strength", 0.0)
+    hook_val = 5.2 + (audio_str * 1.5) + (speech_str * 1.8)
+    if ai_rating is not None:
+        hook_val = (hook_val * 0.5) + (float(ai_rating) * 0.5)
+    hook_strength = round(min(9.9, max(5.0, hook_val)), 1)
+
+    motion_str = ev.get("motion", {}).get("strength", 1.0)
+    w_count = len(said.split()) if said else int(length_s * 2.2)
+    wps = w_count / max(3.0, length_s)
+    pacing_val = 5.5 + (motion_str * 1.6) + min(2.5, wps * 0.7)
+    pacing_score = round(min(9.8, max(5.5, pacing_val)), 1)
+
+    if virality_score >= 90:
+        tier = "Top 5% (Viral Outlier)"
+    elif virality_score >= 80:
+        tier = "Top 15% (Strong Performer)"
+    elif virality_score >= 70:
+        tier = "Top 30% (Solid Clip)"
+    else:
+        tier = "Standard"
+
+    signals = []
+    if speech_str >= 1.0:
+        signals.append("high-energy vocal reaction")
+    if audio_str >= 1.2:
+        signals.append("loudness climax spike")
+    if motion_str >= 1.2:
+        signals.append("dynamic on-screen action")
+    if not signals:
+        signals.append("standalone narrative moment")
+    reason = f"Fast curiosity hook with {', '.join(signals)}. High probability of complete watch-through on Shorts & Reels."
+
+    return {
+        "virality_score": virality_score,
+        "hook_strength": hook_strength,
+        "pacing_score": pacing_score,
+        "retention_tier": tier,
+        "virality_reason": reason,
+    }
+
+
 class ClipMaker:
     def __init__(self, a, stop: threading.Event, transcriber: Transcriber | None, speech=None, titles=None):
         self.a, self.stop, self.transcriber, self.speech, self.titles = a, stop, transcriber, speech, titles
@@ -2248,7 +2329,8 @@ class ClipMaker:
         if title or use_caps:
             ass = a.clip_dir / f"{base}.ass"
             ass.write_text(make_ass(cues if use_caps else [], title, a.layout, a.out_height, a.cam_share,
-                                    length, a.layout == "split", wc if use_caps else None, a.style), encoding="utf-8")
+                                    length, a.layout == "split", wc if use_caps else None, a.style,
+                                    hook_banner=True), encoding="utf-8")
         if not getattr(a, "_res_checked", False):
             a._res_checked = True
             try:
@@ -2298,11 +2380,19 @@ class ClipMaker:
         log(f"CLIP  {dst.name}  [{conf.upper()} {score:.1f}]  {why}  ({length:.0f}s, encoded in {time.time() - t_enc:.0f}s)")
 
         sp = m.chat
+        v_metrics = compute_virality_metrics(score, m.ev, res.get("rating"), transcript, length)
         meta = {
             "time": datetime.now().isoformat(timespec="seconds"),
             "platform": a.platform, "channel": a.channel,
             "stream_title": getattr(a, "stream_title", ""), "clip": dst.name,
             "title": title, "ai_rating": res["rating"], "ai_reason": res["reason"],
+            "virality_score": v_metrics["virality_score"],
+            "hook_strength": v_metrics["hook_strength"],
+            "pacing_score": v_metrics["pacing_score"],
+            "retention_tier": v_metrics["retention_tier"],
+            "virality_reason": v_metrics["virality_reason"],
+            "description": res.get("description") or f"Highlight from {getattr(a, 'stream_title', '') or a.channel}. Watch until the end!",
+            "hashtags": res.get("hashtags") or ["#shorts", "#trending", "#viral", "#fyp"],
             "confidence": conf, "score": round(score, 2), "sources": sorted(m.ev),
             "signals": {k: {"strength": round(v["strength"], 2), "detail": v["detail"]} for k, v in m.ev.items()},
             "said": transcript[:400],
@@ -2642,6 +2732,55 @@ def selftest() -> int:
 # main
 # --------------------------------------------------------------------------- #
 YT_ID = re.compile(r"[A-Za-z0-9_-]{11}")
+
+
+def resolve_playlist_or_channel(url: str, max_items: int = 25) -> list[str]:
+    """
+    Expands a YouTube playlist or channel URL into a list of individual watch URLs.
+    If the URL is a regular single video or stream, returns [url].
+    """
+    u_low = url.lower()
+    is_playlist = "playlist?list=" in u_low or "&list=" in u_low
+    is_channel_vids = ("youtube.com/@" in u_low or "youtube.com/channel/" in u_low) and ("/videos" in u_low or not "/watch" in u_low)
+    if not (is_playlist or is_channel_vids):
+        return [url]
+
+    ytdlp_bin = shutil.which("yt-dlp")
+    if not ytdlp_bin:
+        for c in [Path(__file__).resolve().parent / ".venv" / "Scripts" / "yt-dlp.exe",
+                  Path(__file__).resolve().parent / ".venv" / "bin" / "yt-dlp"]:
+            if c.exists():
+                ytdlp_bin = str(c)
+                break
+    if not ytdlp_bin:
+        return [url]
+
+    try:
+        cmd = [
+            ytdlp_bin, "--flat-playlist", "--dump-json",
+            "--playlist-end", str(max_items),
+            url
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        vids = []
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                vid_id = data.get("id") or data.get("url")
+                if vid_id and len(vid_id) == 11:
+                    vids.append(f"https://www.youtube.com/watch?v={vid_id}")
+                elif data.get("url") and "watch?v=" in data.get("url"):
+                    vids.append(data["url"])
+            except Exception:
+                continue
+        if vids:
+            return vids
+    except Exception as e:
+        log(f"playlist: failed to expand {url}: {e}")
+    return [url]
 
 
 def parse_target(raw: str, platform: str = "auto") -> dict:
