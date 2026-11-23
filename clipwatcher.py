@@ -2395,7 +2395,13 @@ class ClipMaker:
         if sync_target:
             try:
                 sync_p = Path(sync_target)
-                dest_p = sync_p / cat if cat else sync_p
+                sub_name = cat
+                if cat and sync_p.exists():
+                    for sf in sync_p.iterdir():
+                        if sf.is_dir() and sf.name.lower() == cat.lower():
+                            sub_name = sf.name
+                            break
+                dest_p = sync_p / sub_name if sub_name else sync_p
                 dest_p.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(str(dst), str(dest_p / dst.name))
                 thumb_f = info_dir(dst) / f"{base}.jpg"

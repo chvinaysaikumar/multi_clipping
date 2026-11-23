@@ -1954,9 +1954,9 @@ $("#doctor").onclick = async () => {
 function setSyncPreset(type) {
   const input = $("#sync_dir");
   if (!input) return;
-  if (type === 'gdrive') input.value = "G:\\My Drive\\clip";
-  else if (type === 'onedrive') input.value = "C:\\Users\\vinay\\OneDrive\\clip";
-  else if (type === 'desktop') input.value = "C:\\Users\\vinay\\Desktop\\clip";
+  if (type === 'gdrive') input.value = "G:\\My Drive\\Clips";
+  else if (type === 'onedrive') input.value = "C:\\Users\\vinay\\OneDrive\\Clips";
+  else if (type === 'desktop') input.value = "C:\\Users\\vinay\\Desktop\\Clips";
   api("/api/settings", form());
   const msg = $("#sync_status_msg");
   if (msg) { msg.style.color = "var(--accent-cyan)"; msg.textContent = `Preset set: ${input.value}`; }
@@ -2254,7 +2254,13 @@ def make_handler(here: Path, clip_dir: Path, token: str, runner: Runner):
                         if not src_vid.exists():
                             continue
                         cat = get_clip_cat(c)
-                        dest_d = sync_p / cat if cat else sync_p
+                        sub_name = cat
+                        if cat and sync_p.exists():
+                            for sf in sync_p.iterdir():
+                                if sf.is_dir() and sf.name.lower() == cat.lower():
+                                    sub_name = sf.name
+                                    break
+                        dest_d = sync_p / sub_name if sub_name else sync_p
                         dest_d.mkdir(parents=True, exist_ok=True)
 
                         stem = Path(vname).stem
