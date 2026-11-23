@@ -40,7 +40,10 @@ PROFILES = ["gaming", "cricket", "movies", "sports", "podcast", "just-chatting",
 LAYOUTS = ["crop", "blur", "split", "podcast"]
 KEY_NAMES = {"gemini": "GEMINI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
 DEFAULTS = {"source": "live", "top": "", "range": "", "url": "", "url2": "", "url3": "", "url4": "", "profile": "highlights", "category": "auto", "layout": "crop", "cam": "mid-left", "quality": "2k", "streamer": "", "min_conf": "", "min_rating": "",
-            "caption_style": "", "style": "", "extra": "", "sync_dir": ""}
+            "caption_style": "", "style": "", "extra": "", "sync_dir": "",
+            "profile2": "", "layout2": "", "category2": "", "streamer2": "",
+            "profile3": "", "layout3": "", "category3": "", "streamer3": "",
+            "profile4": "", "layout4": "", "category4": "", "streamer4": ""}
 BAD_EXTRA = {"--ui", "--review", "--selftest", "--doctor", "--preview", "--stop-file"}
 
 
@@ -205,6 +208,7 @@ def build_jobs(s: dict, here: Path, stop_file: Path | None = None) -> tuple[list
     st = (s.get("streamer") or "").strip()
     if st and (st.startswith("-") or len(st) > 60):
         return None, "Streamer name looks wrong."
+    cat = (s.get("category") or "").strip()
 
     jobs = []
     for idx, url in enumerate(raw_urls):
@@ -224,13 +228,18 @@ def build_jobs(s: dict, here: Path, stop_file: Path | None = None) -> tuple[list
                 return None, "That doesn't look like a stream link."
             target_args = [url]
 
+        prof_i = (s.get(f"profile{idx+1}") or "").strip() if idx > 0 and (s.get(f"profile{idx+1}") or "").strip() else prof
+        lay_i = (s.get(f"layout{idx+1}") or "").strip() if idx > 0 and (s.get(f"layout{idx+1}") or "").strip() else lay
+        cat_i = (s.get(f"category{idx+1}") or "").strip() if idx > 0 and (s.get(f"category{idx+1}") or "").strip() else cat
+        st_i = (s.get(f"streamer{idx+1}") or "").strip() if idx > 0 and (s.get(f"streamer{idx+1}") or "").strip() else st
+
         shared_args = []
         if top and src != "live":
             shared_args += ["--top", top]
-        if prof:
-            shared_args += ["--profile", prof]
-        if lay:
-            shared_args += ["--layout", lay]
+        if prof_i:
+            shared_args += ["--profile", prof_i]
+        if lay_i:
+            shared_args += ["--layout", lay_i]
         cam = (s.get("cam") or "").strip()
         if cam:
             shared_args += ["--cam", cam]
@@ -243,8 +252,8 @@ def build_jobs(s: dict, here: Path, stop_file: Path | None = None) -> tuple[list
             shared_args += ["--out-height", "1280", "--crf", "18", "--quality", "720p"]
 
         label = extract_label(url, idx)
-        if st:
-            shared_args += ["--streamer", st]
+        if st_i:
+            shared_args += ["--streamer", st_i]
         elif len(raw_urls) > 1:
             shared_args += ["--streamer", label]
 
@@ -258,9 +267,8 @@ def build_jobs(s: dict, here: Path, stop_file: Path | None = None) -> tuple[list
             shared_args += ["--caption-style", cs]
         if sty:
             shared_args += ["--style", sty]
-        cat = (s.get("category") or "").strip()
-        if cat:
-            shared_args += ["--category", cat]
+        if cat_i:
+            shared_args += ["--category", cat_i]
         sd = (s.get("sync_dir") or "").strip()
         if sd:
             shared_args += ["--sync-dir", sd]
@@ -1276,18 +1284,54 @@ pre.doc {
     </div>
 
     <!-- Extra Channels (Multi-Stream) -->
-    <div id="channel2_box" class="url-box hide" style="margin-top:12px;">
+    <div id="channel2_box" class="url-box hide" style="margin-top:14px; background:rgba(99,102,241,0.04); border:1px solid rgba(99,102,241,0.25); border-radius:10px; padding:12px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
         <label for="url2" style="margin-bottom:0; color:#818cf8; font-weight:700;">Channel / Stream 2 URL (Simultaneous)</label>
         <button type="button" class="btn" style="padding:2px 8px; font-size:11px;" onclick="removeChannel(2)">✕ Remove</button>
       </div>
       <div class="url-input-wrap">
         <span class="url-icon">🔗</span>
-        <input id="url2" placeholder="https://www.youtube.com/@KaiCenat/live or twitch.tv/tarik" autocomplete="off">
+        <input id="url2" placeholder="https://www.youtube.com/watch?v=... or Twitch" autocomplete="off">
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-top:10px;">
+        <div>
+          <label for="profile2" style="font-size:11px; margin-bottom:3px; color:var(--text-muted);">Stream 2 Profile</label>
+          <select id="profile2" style="padding:5px 8px; font-size:12px;">
+            <option value="">(Inherit from Main)</option>
+            <option value="podcast">Podcast / 2-Person</option>
+            <option value="gaming">Gaming</option>
+            <option value="cricket">Cricket</option>
+            <option value="movies">Movies</option>
+            <option value="highlights">Highlights</option>
+          </select>
+        </div>
+        <div>
+          <label for="layout2" style="font-size:11px; margin-bottom:3px; color:var(--text-muted);">Stream 2 Layout</label>
+          <select id="layout2" style="padding:5px 8px; font-size:12px;">
+            <option value="">(Inherit from Main)</option>
+            <option value="podcast">🎙️ Dual-Box Podcast Stack</option>
+            <option value="split">Split Facecam</option>
+            <option value="crop">Full Vertical 9:16</option>
+            <option value="blur">Blur</option>
+          </select>
+        </div>
+        <div>
+          <label for="category2" style="font-size:11px; margin-bottom:3px; color:var(--text-muted);">Drive Subfolder</label>
+          <select id="category2" style="padding:5px 8px; font-size:12px;">
+            <option value="">(Inherit / Auto)</option>
+            <option value="Cricket">Cricket</option>
+            <option value="Gaming">Gaming</option>
+            <option value="Movies">Movies</option>
+          </select>
+        </div>
+        <div>
+          <label for="streamer2" style="font-size:11px; margin-bottom:3px; color:var(--text-muted);">Streamer / Guest Name</label>
+          <input id="streamer2" placeholder="e.g. Kai, Rogan, Vinay" style="padding:5px 8px; font-size:12px;">
+        </div>
       </div>
     </div>
 
-    <div id="channel3_box" class="url-box hide" style="margin-top:12px;">
+    <div id="channel3_box" class="url-box hide" style="margin-top:14px; background:rgba(99,102,241,0.04); border:1px solid rgba(99,102,241,0.25); border-radius:10px; padding:12px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
         <label for="url3" style="margin-bottom:0; color:#818cf8; font-weight:700;">Channel / Stream 3 URL</label>
         <button type="button" class="btn" style="padding:2px 8px; font-size:11px;" onclick="removeChannel(3)">✕ Remove</button>
@@ -1296,9 +1340,45 @@ pre.doc {
         <span class="url-icon">🔗</span>
         <input id="url3" placeholder="https://twitch.tv/... or YouTube live link" autocomplete="off">
       </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-top:10px;">
+        <div>
+          <label for="profile3" style="font-size:11px; margin-bottom:3px; color:var(--text-muted);">Stream 3 Profile</label>
+          <select id="profile3" style="padding:5px 8px; font-size:12px;">
+            <option value="">(Inherit from Main)</option>
+            <option value="podcast">Podcast / 2-Person</option>
+            <option value="gaming">Gaming</option>
+            <option value="cricket">Cricket</option>
+            <option value="movies">Movies</option>
+            <option value="highlights">Highlights</option>
+          </select>
+        </div>
+        <div>
+          <label for="layout3" style="font-size:11px; margin-bottom:3px; color:var(--text-muted);">Stream 3 Layout</label>
+          <select id="layout3" style="padding:5px 8px; font-size:12px;">
+            <option value="">(Inherit from Main)</option>
+            <option value="podcast">🎙️ Dual-Box Podcast Stack</option>
+            <option value="split">Split Facecam</option>
+            <option value="crop">Full Vertical 9:16</option>
+            <option value="blur">Blur</option>
+          </select>
+        </div>
+        <div>
+          <label for="category3" style="font-size:11px; margin-bottom:3px; color:var(--text-muted);">Drive Subfolder</label>
+          <select id="category3" style="padding:5px 8px; font-size:12px;">
+            <option value="">(Inherit / Auto)</option>
+            <option value="Cricket">Cricket</option>
+            <option value="Gaming">Gaming</option>
+            <option value="Movies">Movies</option>
+          </select>
+        </div>
+        <div>
+          <label for="streamer3" style="font-size:11px; margin-bottom:3px; color:var(--text-muted);">Streamer / Guest Name</label>
+          <input id="streamer3" placeholder="e.g. Kai, Rogan, Vinay" style="padding:5px 8px; font-size:12px;">
+        </div>
+      </div>
     </div>
 
-    <div id="channel4_box" class="url-box hide" style="margin-top:12px;">
+    <div id="channel4_box" class="url-box hide" style="margin-top:14px; background:rgba(99,102,241,0.04); border:1px solid rgba(99,102,241,0.25); border-radius:10px; padding:12px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
         <label for="url4" style="margin-bottom:0; color:#818cf8; font-weight:700;">Channel / Stream 4 URL</label>
         <button type="button" class="btn" style="padding:2px 8px; font-size:11px;" onclick="removeChannel(4)">✕ Remove</button>
@@ -1306,6 +1386,42 @@ pre.doc {
       <div class="url-input-wrap">
         <span class="url-icon">🔗</span>
         <input id="url4" placeholder="https://twitch.tv/... or YouTube live link" autocomplete="off">
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-top:10px;">
+        <div>
+          <label for="profile4" style="font-size:11px; margin-bottom:3px; color:var(--text-muted);">Stream 4 Profile</label>
+          <select id="profile4" style="padding:5px 8px; font-size:12px;">
+            <option value="">(Inherit from Main)</option>
+            <option value="podcast">Podcast / 2-Person</option>
+            <option value="gaming">Gaming</option>
+            <option value="cricket">Cricket</option>
+            <option value="movies">Movies</option>
+            <option value="highlights">Highlights</option>
+          </select>
+        </div>
+        <div>
+          <label for="layout4" style="font-size:11px; margin-bottom:3px; color:var(--text-muted);">Stream 4 Layout</label>
+          <select id="layout4" style="padding:5px 8px; font-size:12px;">
+            <option value="">(Inherit from Main)</option>
+            <option value="podcast">🎙️ Dual-Box Podcast Stack</option>
+            <option value="split">Split Facecam</option>
+            <option value="crop">Full Vertical 9:16</option>
+            <option value="blur">Blur</option>
+          </select>
+        </div>
+        <div>
+          <label for="category4" style="font-size:11px; margin-bottom:3px; color:var(--text-muted);">Drive Subfolder</label>
+          <select id="category4" style="padding:5px 8px; font-size:12px;">
+            <option value="">(Inherit / Auto)</option>
+            <option value="Cricket">Cricket</option>
+            <option value="Gaming">Gaming</option>
+            <option value="Movies">Movies</option>
+          </select>
+        </div>
+        <div>
+          <label for="streamer4" style="font-size:11px; margin-bottom:3px; color:var(--text-muted);">Streamer / Guest Name</label>
+          <input id="streamer4" placeholder="e.g. Kai, Rogan, Vinay" style="padding:5px 8px; font-size:12px;">
+        </div>
       </div>
     </div>
 
@@ -1581,7 +1697,8 @@ async function api(path, body) {
   return res.json();
 }
 
-const F = ["source","top","range","url","url2","url3","url4","profile","category","layout","cam","quality","streamer","min_conf","min_rating","caption_style","style","extra","sync_dir"];
+const F = ["source","top","range","url","url2","url3","url4","profile","category","layout","cam","quality","streamer","min_conf","min_rating","caption_style","style","extra","sync_dir",
+           "profile2","layout2","category2","streamer2","profile3","layout3","category3","streamer3","profile4","layout4","category4","streamer4"];
 
 function tab(t) {
   $$("section").forEach(s => s.classList.add("hide"));
@@ -1612,6 +1729,10 @@ function removeChannel(n) {
   if (box) {
     box.classList.add("hide");
     $("#url" + n).value = "";
+    if ($("#profile" + n)) $("#profile" + n).value = "";
+    if ($("#layout" + n)) $("#layout" + n).value = "";
+    if ($("#category" + n)) $("#category" + n).value = "";
+    if ($("#streamer" + n)) $("#streamer" + n).value = "";
     api("/api/settings", form());
   }
 }
