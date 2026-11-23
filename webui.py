@@ -1507,9 +1507,11 @@ pre.doc {
         <div>
           <label for="cam">Camera Position (for Split)</label>
           <select id="cam">
+            <option value="bottom-left-wide">Bottom Left - Wide (2 Streamers / MrBeast)</option>
+            <option value="bottom-left">Bottom Left (Single Facecam)</option>
             <option value="mid-left">Middle Left (Shroud / Standard Gaming)</option>
+            <option value="bottom-right-wide">Bottom Right - Wide (2 Streamers)</option>
             <option value="bottom-right">Bottom Right</option>
-            <option value="bottom-left">Bottom Left</option>
             <option value="top-left">Top Left</option>
             <option value="top-right">Top Right</option>
             <option value="auto">Auto-detect facecam</option>
