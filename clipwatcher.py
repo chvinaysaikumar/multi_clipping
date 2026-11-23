@@ -1585,8 +1585,8 @@ class TitleWriter:
         self.provider, self.key = None, None
         if mode in ("auto", "gemini") and gem:
             self.provider, self.key = "gemini", gem
-            if not gem.startswith("AIzaSy") and not gem.startswith("test"):
-                self._warn("GEMINI_API_KEY does not look like a standard Google AI Studio key (expected 'AIzaSy...'). "
+            if not (gem.startswith("AIzaSy") or gem.startswith("AQ.") or len(gem) >= 20) and not gem.startswith("test"):
+                self._warn("GEMINI_API_KEY does not look like a standard Google AI Studio key (expected 'AIzaSy...' or 'AQ...'). "
                            "Get a valid free key at https://aistudio.google.com")
         elif mode in ("auto", "claude") and cla and len(cla) > 30 and cla.startswith("sk-ant-"):
             self.provider, self.key = "claude", cla
@@ -3552,7 +3552,7 @@ def run_file(a) -> int:
     # --- 0) semantic viral story extraction (OpusClip/Klap mode) ---
     gem_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
     use_viral = (getattr(a, "mode", "auto") == "viral") or (
-        getattr(a, "mode", "auto") == "auto" and gem_key.startswith("AIzaSy") and transcriber is not None and not a.no_subs
+        getattr(a, "mode", "auto") == "auto" and (gem_key.startswith("AIzaSy") or gem_key.startswith("AQ.") or len(gem_key) >= 20) and transcriber is not None and not a.no_subs
     )
     if use_viral and transcriber is not None:
         made = run_viral_pipeline(a, path, rec, transcriber, offset, span, stop)
